@@ -1,4 +1,4 @@
-var MirrorDom = { client: {} };
+var MirrorDom = { Client: {} };
 
 MirrorDom.Client.PROP_NAMES = ["value", "checked"];
 
@@ -397,6 +397,6 @@ MirrorDom.Client.JQueryXHRPusher = function(root_url) {
     this.root_url = root_url;
 };
 
-MirrorDom.Client.JQueryXHRPusher.push = function(method, args, callback) {
+MirrorDom.Client.JQueryXHRPusher.prototype.push = function(method, args, callback) {
     jQuery.post(this.root_url + method, args, callback);
 };
