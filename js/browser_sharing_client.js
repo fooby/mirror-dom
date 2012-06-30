@@ -283,6 +283,17 @@ MirrorDom.Client.get_diff = function() {
     return diff;
 };
 
+MirrorDom.Client.new_window = function() {
+    MirrorDom.Client.pusher.push("new_window", {
+            "html": MirrorDom.Client.get_html()
+    },
+    function(window_id) {
+        // window.name persists across page loads
+        window.name = window_id;
+        window.sending = false;
+    });
+};
+
 MirrorDom.Client.start = function() {
     window.browser_sharing_interval = window.setInterval(function() {
         if (window.sending) {
@@ -295,21 +306,19 @@ MirrorDom.Client.start = function() {
             if (window.name) {
                 // already has a window id
                 MirrorDom.Client.pusher.push("reset", {
-                    "window_name": window.name, 
+                    "window_id": window.name, 
                     "html": MirrorDom.Client.get_html()
                 },
-                function() {
+                function(response) {
                     window.sending = false;
+                    if (response === null) {
+                        // server doesn't know about our id? start a new
+                        // session
+                        MirrorDom.Client.new_window()
+                    }
                 });
             } else {
-                MirrorDom.Client.pusher.push("new_window", {
-                        "html": MirrorDom.Client.get_html()
-                    },
-                    function(window_id) {
-                        // window.name persists across page loads
-                        window.name = window_id;
-                        window.sending = false;
-                    });
+                MirrorDom.Client.new_window()
             }
         } else {
             // send difference between now and the cloned dom
@@ -317,7 +326,7 @@ MirrorDom.Client.start = function() {
             if (diff.length) {
                 window.sending = true;
                 MirrorDom.Client.pusher.push("add_diff", {
-                    "window_name": window.name,
+                    "window_id": window.name,
                     "diff": diff
                 }, 
                 function() {
@@ -398,5 +407,8 @@ MirrorDom.Client.JQueryXHRPusher = function(root_url) {
 };
 
 MirrorDom.Client.JQueryXHRPusher.prototype.push = function(method, args, callback) {
+    if (method == "add_diff") {
+        args.diff = JSON.stringify(args.diff);
+    }
     jQuery.post(this.root_url + method, args, callback);
 };

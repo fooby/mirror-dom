@@ -1,8 +1,8 @@
-XPLAN.namespace("browser_sharing.viewer");
+var MirrorDom = { Viewer: {} };
 
-XPLAN.browser_sharing.viewer.next_change_ids = {};
+MirrorDom.Viewer.next_change_ids = {};
 
-XPLAN.browser_sharing.node_at_path = function(root, ipath) {
+MirrorDom.Viewer.node_at_path = function(root, ipath) {
     var node = root;
     for (var i=0; i < ipath.length; i++) {
         /*if (!node.firstChild) {
@@ -19,7 +19,7 @@ XPLAN.browser_sharing.node_at_path = function(root, ipath) {
     return node;
 };
 
-XPLAN.browser_sharing.viewer.apply_attr = function(k, v, node, ipath) {
+MirrorDom.Viewer.apply_attr = function(k, v, node, ipath) {
     // special cases
     if (k == "selected" && node.tagName == "OPTION") {
         // selected <option>. null would indicate
@@ -49,12 +49,12 @@ XPLAN.browser_sharing.viewer.apply_attr = function(k, v, node, ipath) {
     }
 };
 
-XPLAN.browser_sharing.viewer.apply_diffs = function(doc_elem, diffs) {
+MirrorDom.Viewer.apply_diffs = function(doc_elem, diffs) {
     for (var i=0; i < diffs.length; i++) {
         var diff = diffs[i];        
         console.log(diff[0] + "|" + diff[1] + "|");
         if (diff[0] == 'node' || diff[0] == 'text') {
-            var parent = XPLAN.browser_sharing.node_at_path(doc_elem, 
+            var parent = MirrorDom.Viewer.node_at_path(doc_elem, 
                 diff[1].slice(0, diff[1].length-1));
 
             var node = parent.firstChild;
@@ -101,7 +101,7 @@ XPLAN.browser_sharing.viewer.apply_diffs = function(doc_elem, diffs) {
         } else if (diff[0] == 'attribs') {
             var node = XPLAN.browser_sharing.node_at_path(doc_elem, diff[1]);
             for (var k in diff[2]) {
-                XPLAN.browser_sharing.viewer.apply_attr(k, diff[2][k], node,
+                MirrorDom.Viewer.apply_attr(k, diff[2][k], node,
                         diff[1]);
             }
         } else if (diff[0] == 'deleted') {
@@ -120,17 +120,16 @@ XPLAN.browser_sharing.viewer.apply_diffs = function(doc_elem, diffs) {
     }
 }
 
-XPLAN.browser_sharing.viewer.start = function(client_id, container_id) {
+MirrorDom.Viewer.start = function(container_id) {
     window.browser_sharing_interval = window.setInterval(function() {
         if (window.receiving) {
             return;
         }
         window.receiving = true;
-        XMLRPC.call("browser_sharing.get_update",
-            [client_id, 
-            XPLAN.browser_sharing.viewer.next_change_ids],
-            function(result) 
-        {
+        MirrorDom.Viewer.puller.pull("get_update", {
+            "change_ids": MirrorDom.Viewer.next_change_ids
+        }, 
+        function(result) {
             var container = jQuery("#" + container_id);
             for (var window_id in result) {
                 var name = "viewer_" + window_id;
@@ -145,17 +144,17 @@ XPLAN.browser_sharing.viewer.start = function(client_id, container_id) {
 
                 if (change_log.init_html) {
                     var html = change_log.init_html;
-                    html.replace("XPLAN.browser_sharing.client.start();", "");
-                    html = '<html>' + html + '</html>';
+                    html = ['<html>', html, '</html>'].join();
                     viewer.get(0).contentDocument.documentElement.innerHTML = html;
                 }
+
                 if (change_log.diffs) {
-                    XPLAN.browser_sharing.viewer.apply_diffs(
+                    MirrorDom.Viewer.apply_diffs(
                         viewer.get(0).contentDocument.documentElement,
                         change_log.diffs);
                 }
 
-                XPLAN.browser_sharing.viewer.next_change_ids[window_id] =
+                MirrorDom.Viewer.next_change_ids[window_id] =
                     change_log.last_change_id + 1;
             }
             window.receiving = false;
@@ -163,3 +162,21 @@ XPLAN.browser_sharing.viewer.start = function(client_id, container_id) {
     }, 1000);
 };
 
+MirrorDom.Viewer.init = function(options) {
+    if (options.puller) {
+        this.puller = puller;
+    } else {
+        this.puller = new MirrorDom.Viewer.JQueryXHRPuller(options.root_url);
+    }
+};
+
+MirrorDom.Viewer.JQueryXHRPuller = function(root_url) {
+    this.root_url = root_url;
+};
+
+MirrorDom.Viewer.JQueryXHRPuller.prototype.pull = function(method, args, callback) {
+    if (method == "get_update") {
+        args.change_ids = JSON.stringify(args.change_ids);
+    }
+    jQuery.get(this.root_url + method, args, callback);
+};
