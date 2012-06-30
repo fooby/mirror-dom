@@ -1,8 +1,8 @@
-XPLAN.namespace("browser_sharing.client");
+var MirrorDom = { client: {} };
 
-XPLAN.browser_sharing.client.PROP_NAMES = ["value", "checked"];
+MirrorDom.Client.PROP_NAMES = ["value", "checked"];
 
-XPLAN.browser_sharing.client.clone_node = function(node) {
+MirrorDom.Client.clone_node = function(node) {
     // deep copy.
     var clone = {};
     clone.nodeName = node.nodeName;
@@ -15,8 +15,8 @@ XPLAN.browser_sharing.client.clone_node = function(node) {
         }
     }
     // include properties that aren't reflected as DOM attributes
-    for (var i=0; i < XPLAN.browser_sharing.client.PROP_NAMES.length; i++) {
-        var name = XPLAN.browser_sharing.client.PROP_NAMES[i];
+    for (i=0; i < MirrorDom.Client.PROP_NAMES.length; i++) {
+        var name = MirrorDom.Client.PROP_NAMES[i];
         if (name in node) {
             clone.attributes[name] = node[name];
         }
@@ -26,7 +26,7 @@ XPLAN.browser_sharing.client.clone_node = function(node) {
     return clone;
 };
 
-XPLAN.browser_sharing.client.add_node_diff = function(diffs, ipath, node) {
+MirrorDom.Client.add_node_diff = function(diffs, ipath, node) {
     if (node.nodeType == 1) {
         // element        
         diffs.push(['node', ipath.slice(), node.innerHTML, 
@@ -39,33 +39,27 @@ XPLAN.browser_sharing.client.add_node_diff = function(diffs, ipath, node) {
         // not a fragment we care about 
         return;
     }
-}
+};
 
-node_at_path = function(root, ipath) {
+/*node_at_path = function(root, ipath) {
     var node = root;
     for (var i=0; i < ipath.length; i++) {
-        /*if (!node.firstChild) {
-            debugger;
-        }*/
         node = node.firstChild;
         for (var j=0; j < ipath[i]; j++) {
-            /*if (!node.nextSibling) {
-                debugger;
-            }*/
             node = node.nextSibling;            
         }
     }
     return node;
-};
+};*/
 
-XPLAN.browser_sharing.client.compare_nodes = function(diffs, ipath, dnode, cnode) {
+MirrorDom.Client.compare_nodes = function(diffs, ipath, dnode, cnode) {
     if (!cnode) {
         this.add_node_diff(diffs, ipath, dnode);        
         return true;
     }
 
-    if (dnode.nodeName != cnode.nodeName || dnode.nodeType != cnode.nodeType
-        || dnode.nodeValue != cnode.nodeValue) 
+    if (dnode.nodeName != cnode.nodeName || dnode.nodeType != cnode.nodeType || 
+            dnode.nodeValue != cnode.nodeValue) 
     {
         // pretty different, replace the node
         this.add_node_diff(diffs, ipath, dnode);
@@ -77,6 +71,8 @@ XPLAN.browser_sharing.client.compare_nodes = function(diffs, ipath, dnode, cnode
 
     var cattribs = cnode.attributes;
     var diff = false;
+    var key;
+    var attrib;
 
     if (dnode.attributes) {
         // convert .attributes map to an object dict
@@ -85,16 +81,16 @@ XPLAN.browser_sharing.client.compare_nodes = function(diffs, ipath, dnode, cnode
         }
 
         // include properties that aren't reflected as DOM attributes
-        for (var i=0; i < XPLAN.browser_sharing.client.PROP_NAMES.length; i++) {
-            var name = XPLAN.browser_sharing.client.PROP_NAMES[i];
+        for (i=0; i < MirrorDom.Client.PROP_NAMES.length; i++) {
+            var name = MirrorDom.Client.PROP_NAMES[i];
             if (name in dnode) {
                 dattribs[name] = dnode[name];
             }
         }
 
         // any attribs been added/changed?
-        for (var key in dattribs) {
-            var attrib = dattribs[key];
+        for (key in dattribs) {
+            attrib = dattribs[key];
             if (cattribs[key] != attrib) {
                 diff_attribs[key] = attrib;
                 diff = true;
@@ -103,9 +99,9 @@ XPLAN.browser_sharing.client.compare_nodes = function(diffs, ipath, dnode, cnode
     }
 
     // any attribs been removed?
-    for (var key in cattribs) {
+    for (key in cattribs) {
         if (dattribs) {
-            var attrib = dattribs[key];
+            attrib = dattribs[key];
         }
         if (!dattribs || attrib != cattribs[key]) {
             if (attrib) {
@@ -126,7 +122,7 @@ XPLAN.browser_sharing.client.compare_nodes = function(diffs, ipath, dnode, cnode
     return false;
 };
 
-XPLAN.browser_sharing.client.diff_dom = function(dom_root, cloned_root) {
+MirrorDom.Client.diff_dom = function(dom_root, cloned_root) {
     var startTime = new Date().getTime();
     var node = dom_root;
     var cnode = cloned_root;
@@ -134,15 +130,14 @@ XPLAN.browser_sharing.client.diff_dom = function(dom_root, cloned_root) {
     var diffs = [];
     while (true) {
         if (node.firstChild) {
-            if (this.compare_nodes(diffs, istack.concat(0), 
+            if (!this.compare_nodes(diffs, istack.concat(0), 
                     node.firstChild, cnode.firstChild)) {
-                // nodes are too different .. dont descend, drop to next clause
-            } else {                
                 istack.push(0);
                 node = node.firstChild;
                 cnode = cnode.firstChild;
                 continue;
             }
+            // else, nodes are too different .. dont descend, drop to next clause
         } else if (cnode.firstChild) {
             // cloned tree has a firstChild, but its removed from the DOM
             diffs.push(['deleted', istack.concat(0)]);
@@ -228,9 +223,12 @@ XPLAN.browser_sharing.client.diff_dom = function(dom_root, cloned_root) {
             }
         }
     }
+
+    // unreachable?
+    return diffs;
 };
 
-XPLAN.browser_sharing.client.clone_dom = function(root) {
+MirrorDom.Client.clone_dom = function(root) {
     var startTime = new Date().getTime();
     var node = root;
     var cloned_node = this.clone_node(root);
@@ -260,18 +258,20 @@ XPLAN.browser_sharing.client.clone_dom = function(root) {
             cloned_node = cloned_node.nextSibling;
         }
     }
+    // unreachable
+    return null;
 };
 
-XPLAN.browser_sharing.client.get_html = function() {
-    XPLAN.browser_sharing.client.cloned_dom = 
-        XPLAN.browser_sharing.client.clone_dom(document.documentElement);
+MirrorDom.Client.get_html = function() {
+    MirrorDom.Client.cloned_dom = 
+        MirrorDom.Client.clone_dom(document.documentElement);
     var html_node = document.documentElement;
     
     // for first snapshot, just send html
     return html_node.innerHTML;
 };
 
-XPLAN.browser_sharing.client.get_diff = function() {
+MirrorDom.Client.get_diff = function() {
     var diff = this.diff_dom(document.documentElement, this.cloned_dom);
     
     if (diff.length) {
@@ -283,50 +283,56 @@ XPLAN.browser_sharing.client.get_diff = function() {
     return diff;
 };
 
-XPLAN.browser_sharing.client.start = function() {
+MirrorDom.Client.start = function() {
     window.browser_sharing_interval = window.setInterval(function() {
         if (window.sending) {
             return;
         }
 
-        if (!XPLAN.browser_sharing.client.cloned_dom) {
+        if (!MirrorDom.Client.cloned_dom) {
             // first call after page load
             window.sending = true;
             if (window.name) {
                 // already has a window id
-                XMLRPC.call("browser_sharing.reset",
-                    [window.name, XPLAN.browser_sharing.client.get_html()], 
-                    function() {
-                        window.sending = false;
-                    });
+                MirrorDom.Client.pusher.push("reset", {
+                    "window_name": window.name, 
+                    "html": MirrorDom.Client.get_html()
+                },
+                function() {
+                    window.sending = false;
+                });
             } else {
-                XMLRPC.call("browser_sharing.new_window",
-                    [XPLAN.browser_sharing.client.get_html()], function(window_id) {
+                MirrorDom.Client.pusher.push("new_window", {
+                        "html": MirrorDom.Client.get_html()
+                    },
+                    function(window_id) {
                         // window.name persists across page loads
                         window.name = window_id;
                         window.sending = false;
-                });
+                    });
             }
         } else {
             // send difference between now and the cloned dom
-            var diff = XPLAN.browser_sharing.client.get_diff();
+            var diff = MirrorDom.Client.get_diff();
             if (diff.length) {
                 window.sending = true;
-                XMLRPC.call("browser_sharing.add_diff", 
-                    [window.name, diff], function() {
-                        window.sending = false;
-                    });
+                MirrorDom.Client.pusher.push("add_diff", {
+                    "window_name": window.name,
+                    "diff": diff
+                }, 
+                function() {
+                    window.sending = false;
+                });
             }
         }
-
     }, 1000);
 };
 
-XPLAN.browser_sharing.client.stop = function() {
+MirrorDom.Client.stop = function() {
     window.clearInterval(window.browser_sharing_interval);
 };
 
-XPLAN.browser_sharing.client.check_node = function(diffs, istack, node) {
+MirrorDom.Client.check_node = function(diffs, istack, node) {
     if (node.tagName == "SELECT") {
         diffs.push(['attribs', istack.slice(), { 
             "selectedIndex": node.selectedIndex
@@ -338,7 +344,7 @@ XPLAN.browser_sharing.client.check_node = function(diffs, istack, node) {
     }
 };
 
-XPLAN.browser_sharing.client.get_nodes_with_properties = function(dom_root) {
+MirrorDom.Client.get_nodes_with_properties = function(dom_root) {
     // generate a list of diffs from nodes that have properties that
     // won't be represented in innerHTML
     var node = dom_root;
@@ -372,4 +378,25 @@ XPLAN.browser_sharing.client.get_nodes_with_properties = function(dom_root) {
             this.check_node(diffs, istack, node);
         }
     }
+    // unreachable
+    return null;
+};
+
+MirrorDom.Client.init = function(options) {
+    if (options.pusher) {
+        this.pusher = pusher;
+    } else {
+        this.pusher = new MirrorDom.Client.JQueryXHRPusher(options.root_url);
+    }
+};
+
+/* JQuery-XHR implementation of server push - we just POST all the data to
+ * root_url + the method name */
+ 
+MirrorDom.Client.JQueryXHRPusher = function(root_url) {
+    this.root_url = root_url;
+};
+
+MirrorDom.Client.JQueryXHRPusher.push = function(method, args, callback) {
+    jQuery.post(this.root_url + method, args, callback);
 };
