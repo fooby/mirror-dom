@@ -145,6 +145,9 @@ MirrorDom.Viewer.start = function(container_id) {
                 if (change_log.init_html) {
                     var html = change_log.init_html;
                     html = ['<html>', html, '</html>'].join("");
+                    // note that viewer won't execute scripts from the client
+                    // because we use innerHTML to insert (although the
+                    // <script> elements will still be in the DOM)
                     viewer.get(0).contentDocument.documentElement.innerHTML = html;
                     console.log(html);
                 }
