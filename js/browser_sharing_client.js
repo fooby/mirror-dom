@@ -414,5 +414,3 @@ MirrorDom.Client.JQueryXHRPusher.prototype.push = function(method, args, callbac
     }
     jQuery.post(this.root_url + method, args, callback);
 };
-
-alert('test');
