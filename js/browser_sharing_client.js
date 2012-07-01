@@ -285,7 +285,7 @@ MirrorDom.Client.get_diff = function() {
 
 MirrorDom.Client.new_window = function() {
     MirrorDom.Client.pusher.push("new_window", {
-            "html": MirrorDom.Client.get_html()
+        "html": MirrorDom.Client.get_html()
     },
     function(window_id) {
         // window.name persists across page loads
@@ -407,8 +407,10 @@ MirrorDom.Client.JQueryXHRPusher = function(root_url) {
 };
 
 MirrorDom.Client.JQueryXHRPusher.prototype.push = function(method, args, callback) {
-    if (method == "add_diff") {
-        args.diff = JSON.stringify(args.diff);
+    for (var k in args) {
+        if ($.isPlainObject(args[k]) || $.isArray(args[k])) {
+            args[k] = JSON.stringify(args[k]);
+        }
     }
     jQuery.post(this.root_url + method, args, callback);
 };

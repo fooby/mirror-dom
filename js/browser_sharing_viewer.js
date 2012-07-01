@@ -3,17 +3,17 @@ var MirrorDom = { Viewer: {} };
 MirrorDom.Viewer.next_change_ids = {};
 
 MirrorDom.Viewer.node_at_path = function(root, ipath) {
+    console.log("node_at_path: " + ipath);
     var node = root;
     for (var i=0; i < ipath.length; i++) {
-        /*if (!node.firstChild) {
-            debugger;
-        }*/
         node = node.firstChild;
+        console.log("node_at_path: i: " + i + " node: " + node);
         for (var j=0; j < ipath[i]; j++) {
             /*if (!node.nextSibling) {
                 debugger;
             }*/
             node = node.nextSibling;            
+            console.log("node_at_path: j: " + j + " node: " + node);
         }
     }
     return node;
@@ -52,7 +52,7 @@ MirrorDom.Viewer.apply_attr = function(k, v, node, ipath) {
 MirrorDom.Viewer.apply_diffs = function(doc_elem, diffs) {
     for (var i=0; i < diffs.length; i++) {
         var diff = diffs[i];        
-        console.log(diff[0] + "|" + diff[1] + "|");
+        console.log("apply_diff with type: " + diff[0] + " ipath: " + diff[1]);
         if (diff[0] == 'node' || diff[0] == 'text') {
             var parent = MirrorDom.Viewer.node_at_path(doc_elem, 
                 diff[1].slice(0, diff[1].length-1));
@@ -99,13 +99,13 @@ MirrorDom.Viewer.apply_diffs = function(doc_elem, diffs) {
             parent.appendChild(new_elem);
 
         } else if (diff[0] == 'attribs') {
-            var node = XPLAN.browser_sharing.node_at_path(doc_elem, diff[1]);
+            var node = MirrorDom.Viewer.node_at_path(doc_elem, diff[1]);
             for (var k in diff[2]) {
                 MirrorDom.Viewer.apply_attr(k, diff[2][k], node,
                         diff[1]);
             }
         } else if (diff[0] == 'deleted') {
-            var node = XPLAN.browser_sharing.node_at_path(doc_elem, 
+            var node = MirrorDom.Viewer.node_at_path(doc_elem, 
                     diff[1]);
             // remove remaining siblings and node itself
             while (node) {
@@ -144,8 +144,9 @@ MirrorDom.Viewer.start = function(container_id) {
 
                 if (change_log.init_html) {
                     var html = change_log.init_html;
-                    html = ['<html>', html, '</html>'].join();
+                    html = ['<html>', html, '</html>'].join("");
                     viewer.get(0).contentDocument.documentElement.innerHTML = html;
+                    console.log(html);
                 }
 
                 if (change_log.diffs) {

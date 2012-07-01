@@ -8,6 +8,7 @@ import json
 import sys
 
 urls = (
+    "/favicon.ico", None,
     "/client", "Client",
     "/viewer", "Viewer",
     "/(.+)", "MirrorDomHandler"
@@ -24,17 +25,26 @@ class Viewer(object):
         return open("demo_viewer.html").read()
 
 class MirrorDomHandler(object):
-    def POST(self, name):
+    def handle(self, name):
         global storage
-        i = web.input()
+        inputs = web.input()
         web.header("Content-Type", "application/json")
-        return json.dumps(getattr(server, "handle_" + name)(storage, **i))
+
+        if name == "add_diff":
+            # have to de-jsonise diff argument
+            result = server.handle_add_diff(storage, 
+                    window_id=inputs["window_id"],
+                    diff=json.loads(inputs["diff"]))
+        else:
+            result = getattr(server, "handle_" + name)(storage, **inputs)
+
+        return json.dumps(result)
+
+    def POST(self, name):
+        return self.handle(name)
 
     def GET(self, name):
-        global storage
-        i = web.input()
-        web.header("Content-Type", "application/json")
-        return json.dumps(getattr(server, "handle_" + name)(storage, **i))
+        return self.handle(name)
 
 if __name__ == "__main__": 
     import logging
