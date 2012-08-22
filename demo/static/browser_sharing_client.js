@@ -1,1 +1,0 @@
-../../js/browser_sharing_client.js
