@@ -1,0 +1,35 @@
+<html>
+  <head>
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript">
+
+      var text = ["Hi", "Ho", "Fi", "Fo"];
+      var colour = ["blue", "green", "red"];
+
+      function pick_random_item(a) {
+          var i = Math.floor(Math.random() * a.length);
+          return a[i];
+      }
+
+      function spawn() {
+          var s = pick_random_item(text);
+          var c = pick_random_item(colour);
+          $("body").append('<p style="color: ' + c + '">' + s + "</p>");
+          return false;
+      }
+
+      jQuery(function() {
+          $("#spawn").click(spawn);
+      });
+    </script>
+  </head>
+  <body>
+    <h1>Hello world!</h1>
+    <div>
+      Blaurgh
+      <a href="/static/helloworld2.html">Page 2</a>
+      <img src="/static/smiley.png"/>
+      <button id="spawn">Spawn Something</button>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+<html>
+  <head>
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript">
+
+      var text = ["Hi", "Ho", "Fi", "Fo"];
+      var colour = ["white", "yellow", "pink"];
+
+      function pick_random_item(a) {
+          var i = Math.floor(Math.random() * a.length);
+          return a[i];
+      }
+
+      function spawn() {
+          var s = pick_random_item(text);
+          var c = pick_random_item(colour);
+          $("body").append('<p style="color: ' + c + '">' + s + "</p>");
+          return false;
+      }
+
+      jQuery(function() {
+          $("#spawn").click(spawn);
+      });
+    </script>
+  </head>
+  <body style="background-color: blue; color: white;">
+    <h1>Page2<h1>
+    <button id="spawn">Spawn Something</button>
+  </body>
+</html>
