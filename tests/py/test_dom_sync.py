@@ -20,7 +20,7 @@ def teardownModule(self):
 
 class TestDomSync(object):
 
-    HTML_FILE = "test_diff.html"
+    HTML_FILE = "test_dom_sync.html"
 
     def setUp(self):
         # Refresh the test page for a fresh start
