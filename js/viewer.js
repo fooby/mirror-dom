@@ -176,10 +176,11 @@ MirrorDom.Viewer.prototype.poll = function() {
 MirrorDom.Viewer.prototype.receive_updates = function(result) {
     for (var window_id in result) {
         var output_document = this.get_output_document();
+        var doc_elem = output_document.documentElement;
         var change_log = result[window_id];
 
         if (change_log.init_html) {
-            this.apply_html(doc_elem, changelog.init_html);
+            this.apply_html(doc_elem, change_log.init_html);
         }
 
         if (change_log.diffs) {
