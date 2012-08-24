@@ -67,11 +67,16 @@ def handle_mirrordom(name):
     global mirrordom_storage
     query = bottle.request.params
     bottle.response.set_header("Content-Type", "application/json")
+
+    #TODO: Tidy up this mess
     if name == "add_diff":
         # have to de-jsonise diff argument
         result = mirrordom.server.handle_add_diff(mirrordom_storage,
                 window_id=query["window_id"],
                 diff=json.loads(query["diff"]))
+    elif name == "get_update":
+        result = mirrordom.server.handle_get_update(mirrordom_storage,
+                change_ids=json.loads(query["change_ids"]))
     else:
         result = getattr(mirrordom.server, "handle_" + name)(mirrordom_storage, **query)
     return json.dumps(result)

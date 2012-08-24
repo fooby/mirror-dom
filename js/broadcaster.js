@@ -463,7 +463,7 @@ MirrorDom.Broadcaster.prototype.get_nodes_with_properties = function(dom_root) {
  */
 MirrorDom.Broadcaster.prototype.init = function(options) {
     if (options.pusher) {
-        this.pusher = pusher;
+        this.pusher = options.pusher;
     } else {
         this.pusher = new MirrorDom.JQueryXHRPusher(options.root_url);
     }
@@ -484,7 +484,7 @@ MirrorDom.JQueryXHRPusher = function(root_url) {
 
 MirrorDom.JQueryXHRPusher.prototype.push = function(method, args, callback) {
     for (var k in args) {
-        if ($.isPlainObject(args[k]) || $.isArray(args[k])) {
+        if (jQuery.isPlainObject(args[k]) || jQuery.isArray(args[k])) {
             args[k] = JSON.stringify(args[k]);
         }
     }

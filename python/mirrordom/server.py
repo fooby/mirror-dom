@@ -2,7 +2,7 @@ import time
 import logging
 import pprint
 import uuid
-import json
+#import json
 
 logger = logging.getLogger("mirrordom")
 
@@ -44,6 +44,13 @@ class Changelog(object):
                 "last_updated": self.last_updated,
                 "last_change_id": self.first_change_id + len(self.diffs) 
             }
+
+def create_storage():
+    """
+    Create a state storage object. Right now this is just a dictionary but
+    this could always change...
+    """
+    return {}
 
 def handle_new_window(storage, html):
     """
@@ -110,7 +117,7 @@ def handle_get_update(storage, change_ids):
     called from the viewer to request changes.
     returns a dictionary { window_id -> diffs }
     """
-    change_ids = json.loads(change_ids)
+    #change_ids = json.loads(change_ids)
 
     logger.debug("get_update: %s", change_ids)
 

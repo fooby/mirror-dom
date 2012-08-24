@@ -154,12 +154,12 @@ MirrorDom.Viewer.prototype.get_output_document = function() {
 }
 
 MirrorDom.Viewer.prototype.poll = function() {
-    console.log("Polling!");
     if (this.receiving) {
         console.log("Already receiving, aborting");
         return;
     }
 
+    console.log("POOL!");
 
     this.receiving = true;
     var self = this;
@@ -203,7 +203,7 @@ MirrorDom.Viewer.prototype.start = function(container_id) {
 
 MirrorDom.Viewer.prototype.init = function(options) {
     if (options.puller) {
-        this.puller = puller;
+        this.puller = options.puller;
     } else {
         this.puller = new MirrorDom.Viewer.JQueryXHRPuller(options.root_url);
     }
