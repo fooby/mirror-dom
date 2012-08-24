@@ -1,4 +1,4 @@
-var MirrorDom = { Viewer: {} };
+var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
 MirrorDom.Viewer = function(options) {
     this.receiving = false;
@@ -52,6 +52,15 @@ MirrorDom.Viewer.prototype.apply_attr = function(k, v, node, ipath) {
         node.setAttribute(k, v);
     }
 };
+
+MirrorDom.Viewer.prototype.apply_html = function(doc_elem, html) {
+    var full_html = ['<html>', html, '</html>'].join("");
+    // note that viewer won't execute scripts from the client
+    // because we use innerHTML to insert (although the
+    // <script> elements will still be in the DOM)
+    doc_elem.innerHTML = full_html;
+    console.log(full_html);
+}
 
 MirrorDom.Viewer.prototype.apply_diffs = function(doc_elem, diffs) {
     for (var i=0; i < diffs.length; i++) {
@@ -170,13 +179,7 @@ MirrorDom.Viewer.prototype.receive_updates = function(result) {
         var change_log = result[window_id];
 
         if (change_log.init_html) {
-            var html = change_log.init_html;
-            html = ['<html>', html, '</html>'].join("");
-            // note that viewer won't execute scripts from the client
-            // because we use innerHTML to insert (although the
-            // <script> elements will still be in the DOM)
-            output_document.documentElement.innerHTML = html;
-            console.log(html);
+            this.apply_html(doc_elem, changelog.init_html);
         }
 
         if (change_log.diffs) {

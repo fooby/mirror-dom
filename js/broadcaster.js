@@ -1,8 +1,10 @@
-var MirrorDom = { Broadcaster: {} };
+var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
 MirrorDom.Broadcaster = function(options) {
+    this.sending = false;
     this.cloned_dom = null;
     this.interval_event = null;
+    this.name = null;
     this.init(options);
 }
 
@@ -237,6 +239,9 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
     return diffs;
 };
 
+/**
+ * Returns a copy of a DOM tree
+ */
 MirrorDom.Broadcaster.prototype.clone_dom = function(root) {
     var startTime = new Date().getTime();
     var node = root;
@@ -316,32 +321,40 @@ MirrorDom.Broadcaster.prototype.get_diff = function() {
 };
 
 MirrorDom.Broadcaster.prototype.new_window = function() {
+    var self = this;
     this.pusher.push("new_window", {
         "html": this.get_html()
     },
     function(window_id) {
         // window.name persists across page loads
-        window.name = window_id;
-        window.sending = false;
+        self.name = window_id;
+        self.sending = false;
     });
 };
 
+MirrorDom.Broadcaster.prototype.is_new_window = function() {
+
+    return (!this.cloned_dom);
+}
+
 MirrorDom.Broadcaster.prototype.poll = function() {
-    if (window.sending) {
+    if (this.sending) {
+        console.log("still sending...")
         return;
     }
+    console.log("POL!")
 
-    if (!this.cloned_dom) {
+    if (this.is_new_window()) {
         // first call after page load
-        window.sending = true;
-        if (window.name) {
+        this.sending = true;
+        /*if (this.name) {
             // already has a window id
             this.pusher.push("reset", {
-                "window_id": window.name, 
+                "window_id": this.name, 
                 "html": this.get_html()
             },
             function(response) {
-                window.sending = false;
+                this.sending = false;
                 if (response === null) {
                     // server doesn't know about our id? start a new
                     // session
@@ -350,23 +363,29 @@ MirrorDom.Broadcaster.prototype.poll = function() {
             });
         } else {
             this.new_window()
-        }
+        }*/
+
+        this.new_window()
     } else {
         // send difference between now and the cloned dom
         var diff = this.get_diff();
+        var self = this;
         if (diff.length) {
-            window.sending = true;
+            this.sending = true;
             this.pusher.push("add_diff", {
-                "window_id": window.name,
+                "window_id": this.name,
                 "diff": diff
             }, 
             function() {
-                window.sending = false;
+                self.sending = false;
             });
         }
     }
 }
 
+/**
+ * Entry point
+ */
 MirrorDom.Broadcaster.prototype.start = function() {
     var self = this;
     console.log("Poll interval: " + this.poll_interval);
@@ -376,7 +395,7 @@ MirrorDom.Broadcaster.prototype.start = function() {
 };
 
 MirrorDom.Broadcaster.prototype.stop = function() {
-    window.clearInterval(window.browser_sharing_interval);
+    window.clearInterval(this.poll_interval);
 };
 
 MirrorDom.Broadcaster.prototype.check_node = function(diffs, istack, node) {
