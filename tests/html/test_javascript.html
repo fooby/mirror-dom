@@ -1,0 +1,124 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="../../js/common.js"></script>
+    <script type="text/javascript" src="../../js/broadcaster.js"></script>
+    <script type="text/javascript" src="../../js/viewer.js"></script>
+    <script type="text/javascript" src="test_util.js"></script>
+    <script type="text/javascript" src="json2.js"></script>
+    <script type="text/javascript" >
+      var broadcaster_iframe = null;
+      var viewer_iframe = null;
+      var broadcaster = null;
+      var viewer = null;
+
+      // Initialisation
+      jQuery(document).ready(function() {
+          broadcaster_iframe = document.getElementById("source_iframe");          
+          viewer_iframe = document.getElementById("dest_iframe");          
+          broadcaster = new MirrorDom.Broadcaster({
+              iframe: broadcaster_iframe
+          });
+
+          viewer = new MirrorDom.Viewer({
+              iframe: viewer_iframe
+          });
+      });
+
+      // ************** UNIT TESTS ****************
+
+      // Test 1: Test retrieve html
+      // ------------------------------------------
+
+      function test_1_get_broadcaster_document() {
+          var data = broadcaster.get_document_data();
+          return data;
+      }
+
+      // Test 2: Test apply html
+      // ------------------------------------------
+
+      function test_2_apply_document(result) {
+          viewer.apply_document(result); 
+      }
+
+      // ---------- Test 2: Test apply html ------------
+      function test_2_modify_broadcaster_document() {
+          broadcaster_iframe.contentWindow.add_div();
+      }
+
+      function test_2_get_broadcaster_diff() {
+          debugger;
+          var diff = broadcaster.get_diff();
+          return JSON.stringify(diff);
+      }
+
+
+      // ---------- End Test 2       ------------
+
+      // *************** END TESTS *****************
+
+      // The following functions are used for doing the testing verification
+      function get_broadcaster_html() {
+          return MDTestUtil.get_html(broadcaster_iframe);
+      }
+
+      function get_viewer_html() {
+          return MDTestUtil.get_html(viewer_iframe);
+      }
+
+      function manual_dump() {
+          var html = 
+ '   <html> \
+      <head> \
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type"></meta> \
+        <sc' + 'ript src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js" type="text/javascript"></scr' + 'ipt> \
+        <sc' + 'ript type="text/javascript"></scr' + 'ipt> \
+        <style type="text/css">table { border-collapse: collapse; } \
+        table,th,td { border: 1px solid black; }</style> \
+      </head> \
+      <body> \
+        <h3>Hallow world!</h3> \
+        <div> \
+        ohay \
+          <table id="thetable" style="border: 1px solid pink;"> \
+          <tr> \
+            <th>1</th> \
+            <th>2</th> \
+          </tr> \
+          <tr> \
+            <td>a</td> \
+            <td>b</td> \
+          </tr> \
+          <tr> \
+            <td>c</td> \
+            <td>d</td> \
+          </tr> \
+          </table> \
+        </div> \
+        <div> \
+          <input id="text_input" length="50" type="text" value="hello"></input> \
+        </div> \
+        <a href="test_dom_sync_content2.html">Page 2</a> \
+      </body> \
+    </html>';
+          viewer.apply_document(html);
+      }
+
+      function manual_diff() {
+          test_1_get_broadcaster_document();
+          test_2_modify_broadcaster_document();
+          test_2_get_broadcaster_diff();
+      }
+
+    </script>
+  </head>
+  <body>
+    <iframe id="source_iframe" src="test_javascript_content.html" style="width: 100%; height: 200px"></iframe>
+    <iframe id="dest_iframe" src="blank.html" style="width: 100%; height: 200px"></iframe>
+
+    <a href="javascript:manual_dump()">Manual dump!</a><br/>
+    <a href="javascript:manual_diff()">Manual diff!</a>
+  </body>
+</html>

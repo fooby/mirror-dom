@@ -11,6 +11,7 @@ Steps:
 
 import os
 import wsgiref
+import logging
 import json
 
 from external_libs import bottle
@@ -32,9 +33,16 @@ sys.path.append(MIRRORDOM_PYTHON_PATH)
 import mirrordom
 import mirrordom.server
 
+
 # Global storage for mirrordom diffs - this means we only have one global
 # mirrordom session for the demo.
 mirrordom_storage = {}
+
+logger = logging.getLogger("mirrordom")
+logger.setLevel(logging.DEBUG)
+h = logging.StreamHandler(sys.stdout)
+logger.addHandler(h)
+
 
 def get_mirrordom_uri(environ=None):
     if environ is None:
@@ -47,16 +55,17 @@ def viewer():
     """ Serve the viewer page """
     return bottle.template('simple_viewer', mirrordom_uri=get_mirrordom_uri())
 
+#@app.route('/broadcaster')
+#def broadcaster():
+#    """ Serve the broadcaster page (make sure not to run multiple instances of
+#    this page) """
+#    return bottle.template('simple_broadcaster', mirrordom_uri=get_mirrordom_uri())
+#
 @app.route('/broadcaster')
 def broadcaster():
     """ Serve the broadcaster page (make sure not to run multiple instances of
     this page) """
-    return bottle.template('simple_broadcaster', mirrordom_uri=get_mirrordom_uri())
-
-@app.route('/broadcaster_iframe')
-def broadcaster():
-    """ Serve the broadcaster page (make sure not to run multiple instances of
-    this page) """
+    print "HI"
     return bottle.template('iframe_broadcaster', mirrordom_uri=get_mirrordom_uri())
 
 @app.route('/mirrordom/<name>', method='ANY')
@@ -77,8 +86,16 @@ def handle_mirrordom(name):
     elif name == "get_update":
         result = mirrordom.server.handle_get_update(mirrordom_storage,
                 change_ids=json.loads(query["change_ids"]))
+    elif name == "new_window":
+        result = mirrordom.server.handle_new_window(mirrordom_storage,
+                html=query["html"], url=query["url"])
+    elif name == "reset":
+        result = mirrordom.server.handle_reset(mirrordom_storage,
+                query["window_id"], query["html"], query["url"])
+
     else:
         result = getattr(mirrordom.server, "handle_" + name)(mirrordom_storage, **query)
+    print result
     return json.dumps(result)
 
 @app.route('/static/mirrordom/<filepath:path>')

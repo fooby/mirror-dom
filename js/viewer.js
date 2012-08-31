@@ -1,9 +1,22 @@
+/**
+ * MirrorDom viewer proof of concept
+ */
+
 var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
 MirrorDom.Viewer = function(options) {
     this.receiving = false;
+    this.iframe = null;
     this.next_change_ids = {};
     this.init(options);
+}
+
+MirrorDom.Viewer.prototype.get_document_object = function() {
+    return MirrorDom.Util.get_document_object_from_iframe(this.iframe);
+}
+
+MirrorDom.Viewer.prototype.get_document_element = function() {
+    return this.get_document_object().documentElement;
 }
 
 MirrorDom.Viewer.prototype.node_at_path = function(root, ipath) {
@@ -53,18 +66,122 @@ MirrorDom.Viewer.prototype.apply_attr = function(k, v, node, ipath) {
     }
 };
 
-MirrorDom.Viewer.prototype.apply_html = function(doc_elem, html) {
-    var full_html = ['<html>', html, '</html>'].join("");
+MirrorDom.Viewer.prototype.apply_head_html = function(doc_elem, head_html) {
+    var head = doc_elem.getElementsByTagName('head')[0];
+    var new_doc = jQuery.parseXML('<head>' + head_html + '</head>');
+    var head = jQuery(head);
+    new_doc.children().each(function() {
+        jQuery(this).appendTo(head);
+    });
+}
+
+
+/**
+ * Takes in a browser native XML element (NOT jquery wrapped)
+ */
+MirrorDom.Viewer.prototype.xml_to_string = function(xml_node) {
+    var s;
+    //IE
+    if (window.ActiveXObject){
+        s = xml_node.xml;
+    }
+    // code for Mozilla, Firefox, Opera, etc.
+    else{
+        s = (new XMLSerializer()).serializeToString(xml_node);
+    }
+    return s;
+}
+
+/**
+ * @param use_innerhtml     False if appending child by child
+ *                          True if building an XML fragment to dump into the
+ *                          node as one big lump
+ *                          
+ */
+MirrorDom.Viewer.prototype.copy_to_node = function(xml_node, dest, use_innerhtml) {
+    var children = xml_node.children();
+    if (use_innerhtml) {
+        var inner_html = [""];
+        for (var i = 0; i < children.length; i++) {
+            var new_node = children[i];
+            var new_xml  = this.xml_to_string(new_node);
+            inner_html.push(new_xml);
+        }
+        dest.html(inner_html.join(""));
+    }
+    else {
+        for (var i = 0; i < children.length; i++) {
+            var new_node = children[i];
+            // TODO...can we just chuck the node straight in without converting
+            // back to a string?
+            dest.append(this.xml_to_string(new_node));
+        }
+    }
+}
+
+/**
+ * Gets the output of Broadcaster.get_document and reproduces it against
+ * the current document element.
+ *
+ * EXPECTS WELL FORMED XML. If you rip innerHTML (which is HTML but
+ * not well formed XML) out of a document and chuck it back in here, that won't
+ * work.
+ */
+MirrorDom.Viewer.prototype.apply_document = function(data) {
+
+    //var full_html = ['<html>', html, '</html>'].join("");
     // note that viewer won't execute scripts from the client
     // because we use innerHTML to insert (although the
     // <script> elements will still be in the DOM)
-    doc_elem.innerHTML = full_html;
-    console.log(full_html);
+    //doc_elem.innerHTML = full_html;
+    //console.log(full_html);
+    //jQuery(doc_elem).html(full_html);
+    //console.log(full_html);
+    
+    var doc_elem = this.get_document_element();
+
+    var new_doc = jQuery(jQuery.parseXML(data));
+    var new_head_node = new_doc.find("head");
+
+    if (new_head_node.length > 0) {
+        var current_head = doc_elem.getElementsByTagName('head')[0];
+        current_head = jQuery(current_head);
+        this.copy_to_node(new_head_node, current_head, false);
+    }
+
+    var current_body = doc_elem.getElementsByTagName('body')[0];
+    current_body = jQuery(current_body).empty();
+    var new_body_node = new_doc.find("body");
+    this.copy_to_node(new_body_node, current_body, true);
+
+    /*var body = doc_elem.getElementsByTagName('body')[0];
+
+    var head_html = data[0];
+    var body_html = data[1];
+    body.innerHTML = body_html;
+
+    this.apply_head_html(doc_elem, head_html);*/
 }
 
-MirrorDom.Viewer.prototype.apply_diffs = function(doc_elem, diffs) {
+MirrorDom.Viewer.prototype.apply_diffs = function(diffs) {
+    var doc_elem = this.get_document_element();
+
     for (var i=0; i < diffs.length; i++) {
         var diff = diffs[i];        
+
+
+        // Diff structure:
+        //
+        // 0) "node" or "text"
+        // 1) Path to node (node offsets at each level of tree)
+        // 2) Inner HTML
+        // 3) Element definition:
+        //    - attributes: HTML attributes
+        //    - nodeName:   Node name
+        //    - nodeType:   Node type
+        // 4) Extra properties to apply
+
+        
         console.log("apply_diff with type: " + diff[0] + " ipath: " + diff[1]);
         if (diff[0] == 'node' || diff[0] == 'text') {
             var parent = this.node_at_path(doc_elem, 
@@ -101,7 +218,9 @@ MirrorDom.Viewer.prototype.apply_diffs = function(doc_elem, diffs) {
                     new_elem.setAttribute(k, cloned_node.attributes[k]);
                 }
 
-                new_elem.innerHTML = diff[2];
+                //new_elem.innerHTML = diff[2];
+                // Derek HACK
+                jQuery(new_elem).html(diff[2]);
 
                 // apply diffs of properties like .value, selectedIndex
                 // etc which wouldn't be in innerHTML
@@ -133,26 +252,6 @@ MirrorDom.Viewer.prototype.apply_diffs = function(doc_elem, diffs) {
     }
 }
 
-MirrorDom.Viewer.prototype.get_output_document = function() {
-    var d = null;
-    if (this.iframe) {
-        // Retrieve iframe document
-        if (this.iframe.contentDocument) {
-            // Firefox
-            d = this.iframe.contentDocument;
-        }
-        else if (this.iframe.contentWindow) {
-            // IE
-            d = this.iframe.contentWindow.contentDocument;
-        }
-        else {
-            console.log("What the hell happened");
-        }
-    }
-
-    return d;
-}
-
 MirrorDom.Viewer.prototype.poll = function() {
     if (this.receiving) {
         console.log("Already receiving, aborting");
@@ -175,18 +274,16 @@ MirrorDom.Viewer.prototype.poll = function() {
 
 MirrorDom.Viewer.prototype.receive_updates = function(result) {
     for (var window_id in result) {
-        var output_document = this.get_output_document();
-        var doc_elem = output_document.documentElement;
+        var doc_elem = this.get_document_element();
         var change_log = result[window_id];
 
+        //debugger;
         if (change_log.init_html) {
-            this.apply_html(doc_elem, change_log.init_html);
+            this.apply_document(change_log.init_html);
         }
 
         if (change_log.diffs) {
-            this.apply_diffs(
-                output_document.documentElement,
-                change_log.diffs);
+            this.apply_diffs(change_log.diffs);
         }
 
         this.next_change_ids[window_id] =

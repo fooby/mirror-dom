@@ -5,6 +5,8 @@
         <script type="text/javascript"
             src="/static/json2.js"></script>
         <script type="text/javascript"
+            src="/static/mirrordom/common.js"></script>
+        <script type="text/javascript"
             src="/static/mirrordom/broadcaster.js"></script>
         <!-- not a mirrordom dependency, just makes doing the demo page 
             easier -->

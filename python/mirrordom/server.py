@@ -2,6 +2,12 @@ import time
 import logging
 import pprint
 import uuid
+import lxml
+import lxml.etree
+import lxml.html
+import lxml.html.clean
+import lxml.html.html5parser
+
 #import json
 
 logger = logging.getLogger("mirrordom")
@@ -27,7 +33,10 @@ class Changelog(object):
         have arrived since since_change_id (inclusive)
         """
 
-        if since_change_id is None or since_change_id < self.first_change_id:
+        logger.debug("Since change id: %s, First change id: %s",
+                since_change_id, self.first_change_id)
+
+        if since_change_id is None or since_change_id <= self.first_change_id:
             logger.debug("returning init_html") 
             return {
                 "init_html": self.init_html,
@@ -45,6 +54,33 @@ class Changelog(object):
                 "last_change_id": self.first_change_id + len(self.diffs) 
             }
 
+def _get_html_cleaner():
+    cleaner = lxml.html.clean.Cleaner()
+    cleaner.frames = False
+    cleaner.forms = False
+    cleaner.page_structure = False
+    #cleaner.style = False
+    return cleaner
+
+def sanitise_document(html):
+    """
+    Strip out nasties such as <meta>, <script> and other useless bits of
+    information.
+    """
+    #html_tree = lxml.html.soupparser.fromstring(html)
+
+    # This converts into a well formed html document 
+    parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
+    html_tree = lxml.html.html5parser.fromstring(html, parser=parser)
+
+    #cleaner(html_tree)
+
+    temp = lxml.html.tostring(html_tree)
+    final_html_tree = lxml.html.fromstring(temp)
+    cleaner = _get_html_cleaner()
+    cleaner(final_html_tree)
+    return lxml.etree.tostring(final_html_tree)
+
 def create_storage():
     """
     Create a state storage object. Right now this is just a dictionary but
@@ -52,20 +88,28 @@ def create_storage():
     """
     return {}
 
-def handle_new_window(storage, html):
+def handle_new_window(storage, html, url):
     """
     called by the client to create a new sharing session in a new window. we
     individually track each window the client has open in session local storage.
 
     returns a window id which the window should use for subsequent updates
+
+    :param html:    Yeah, this is no longer a string. It's something weird
+                    now!
     """
 
-    window_id = str(uuid.uuid1())
+    #window_id = str(uuid.uuid1())
+    #storage["window-%s" % window_id] = Changelog(html, 0)
+    #logger.debug("new_window: %s", window_id)
+
+    # Ayup, we're going to clean nasties out of the HTML
+    html = sanitise_document(html)
+    window_id = "lol"
     storage["window-%s" % window_id] = Changelog(html, 0)
-    logger.debug("new_window: %s", window_id)
     return window_id
 
-def handle_reset(storage, window_id, html):
+def handle_reset(storage, window_id, html, url):
     """
     called by the client to reset the changelog with a full html snapshot
 
@@ -87,7 +131,10 @@ def handle_reset(storage, window_id, html):
     
     # continue the sequence of change ids
     first_change_id = previous_changelog.last_change_id + 1
+    
+    logger.debug("New first change id: %s", first_change_id)
 
+    html = sanitise_document(html)
     # overwrite previous changelog
     storage["window-%s" % window_id] = Changelog(html, first_change_id)
 
@@ -125,3 +172,5 @@ def handle_get_update(storage, change_ids):
         window_id : cl.diff_since_change_id(change_ids.get(window_id))
         for window_id, cl in storage.items()
     }
+
+
