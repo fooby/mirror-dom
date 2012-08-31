@@ -188,8 +188,35 @@ MirrorDom.Broadcaster.prototype.diff_dom2 = function(dom_root, cloned_root) {
     var node = dom_root;
     var cnode = cloned_root;
 
-    // Basically a glorified "current position" indicator
+    // istack contains our current position in the tree. This is basically a
+    // list of node offsets. Each entry in the list corresponds to a level of
+    // the tree, with the value corresponding the 0-based offset of the node
+    // relative to its siblings.
+    //
+    // Example:
+    // In the following document:
+    //
+    // <html>
+    //   <head>...</head>
+    //   <body>
+    //     <div>...</div>
+    //     <a>...</a>
+    //     <p>...</p>
+    //     <li>...</li>
+    //   </body>
+    // </html>
+    //
+    // (In this example assume text nodes don't exist)
+    //
+    // [0, 1, 3] represents the path to the <li> element.
+    //
+    // 0 = The <html> element (the first entry will always be 0)
+    // 1 = The 2nd element under html, in this case <body>
+    // 3 = The 4th element under body, in this case <li>
+    //
     var istack = [];
+
+    // The collection of diff directives to transmit to the mirrordom server 
     var diffs = [];
 
     // Alright, before we start:
@@ -208,132 +235,138 @@ MirrorDom.Broadcaster.prototype.diff_dom2 = function(dom_root, cloned_root) {
 
     // This variable is set to false when first visiting a node, and true
     // when exiting (i.e. ready to traverse).
-    var finished_comparing_node = false;
+    var finished_traversing_children = false;
     var ascend_parent = false;
 
     // Keep tabs on the parents
     var node_parent = null;
     var cnode_parent = null;
    
+
     while (true) {
-        // node is the actual node we're focusing on
-        // cnode is the corresponding node from the cloned tree
-
-        // Either:
-        // 1) Cloned node does not exist, indicating recently added nodes
-        // 2) Actual node does not exist, indicating recently removed nodes
-        // 3) Both exist, so we're going to have to compare them and
-        //    traverse children
+        // Loop philosophy: Basically at the start of each loop we have to
+        // compare the values of node and cnode. "node" represents a node from
+        // the actual tree, and "cnode" represents a node from the cloned tree.
         //
-        // Special case: Both actual and cloned nodes are null, indicating
-        // we've reached the end of traversing siblings
+        // At the end of the loop, "node" and "cnode" are advanced onto the
+        // next nodes that we need to compare, at which point we start a new
+        // iteration. 
+        //
+        // The following scenarios are possible with regards to "cnode" and
+        // "node":
+        // 1) "cnode" does not exist, but "node" does. This indicates recently
+        //    added nodes.
+        // 2) "node" does not exist, but "cnode" does. This indicates recently
+        //    removed nodes.
+        // 3) Both "cnode" and "node" exist, so we're going to have to compare
+        //    their values and traverse children.
+        //
 
-        // We've reached the end of traversing siblings, go back to parent
-        if (node == null && cnode == null) {
+        // IMPORTANT: We need to ignore certain node types as they will have
+        // been stripped out in the viewer DOM. This causes their node offsets
+        // to differ, so in order to compensate we need to skip certain nodes.
+        while (node != null && MirrorDom.Util.should_ignore_node(node)) {
+            node = node.nextSibling;    
+        }
+        while (cnode != null && MirrorDom.Util.should_ignore_node(cnode)) {
+            cnode = cnode.nextSibling;    
+        }
+
+        if (finished_traversing_children) {
+            // Scenario 4: We've just ascended into this node after traversing
+            // its children. Do nothing so we can traverse onto the next
+            // sibling.
+
+            // Reset back to false
+            finished_traversing_children = false;
         } else if (cnode == null) {
-            // Scenario 1: Cloned node does not exist
-            // 
-            // One or more nodes have been added
+            // Scenario 1: A node was added
             while (node) {
                 istack[istack.length-1]++;
                 this.add_node_diff(diffs, istack, node);
                 node = node.nextSibling;
             }
 
-            // At this point, both cnode and node should be null
+            // Go back up into parent
             ascend_parent = true;
-            finished_comparing_node = true;
         } else if (node == null) {
-            // Scenario 2: Actual node does not exist
-            //
-            // One or more nodes have been removed
+            // Scenario 2: A node has been removed
             diffs.push(['deleted', istack.slice()]);
 
-            // Set cnode to null, in order to trigger behaviour to go back up
-            // the parent
+            // Go back up into parent
             ascend_parent = true;
-            finished_comparing_node = true;
-        }
+        } else {
 
-        
-        // Scenario 3: Begin comparing the node
-        // We are going to:
-        // 1) Compare the node tagNames, attributes, properties
-        // 2) Traverse and compare the nodes' children
-        if (!finished_comparing_node) {
-
-            // Let's start by comparing the two nodes
-            var changed = this.compare_nodes(diffs, istack, node,
-                    cnode);
+            // Scenario 3: We have nodes we need to compare
+            // Compare the node tagNames, attributes, properties
+            var changed = this.compare_nodes(diffs, istack, node, cnode);
 
             if (!changed) {
-                // Nodes are the same, descend into children
-
                 if (node.firstChild == null && cnode.firstChild == null) {
-                    // Ok, nodes are the same, no children on either
-                    // node...proceed to next sibling!
-                    finished_comparing_node = true;
+                    // No children, let's proceed to the next sibling (below)
                 }
                 else {
+                    // Nodes are the same, traverse and compare the nodes' children
                     node_parent = node;
                     cnode_parent = cnode;
                     node = node.firstChild;
                     cnode = cnode.firstChild;
-                    
                     istack.push(0);
+
+                    // Begin new loop
                     continue
                 }
             }
             else {
-                // compare_nodes has already added a node diff, so
-                // no further action needed
-                finished_comparing_node = true;
+                // Special case: The nodes are different, so compare_nodes has
+                // basically added an entire diff directive to reconstruct this
+                // node. We'll move onto the next node.
             }
         }
 
         // Finished comparing the node, perform traversal onto next sibling or parent
-        if (finished_comparing_node) {
-            if (!ascend_parent) {
-                // We have compared the children (or no children were present),
-                // let's traverse to the next sibling. If no siblings then
-                // ascend to parent. 
-                node = node.nextSibling;
-                cnode = cnode.nextSibling;
+        // Note: ascend_parent may have been set if we already know we want to go
+        // back up. Otherwise we'll try to move onto the next sibling, or
+        // if they don't exist then we'll go back up.
+        if (!ascend_parent) {
 
-                if (node == null && cnode == null) {
+            // Move onto the next sibling
+            node = node.nextSibling;
+            cnode = cnode.nextSibling;
 
-                    // Test if we're back at the root element.
-                    // Semi hack: The parent of an actual HTML node is the Document node,
-                    // while the parent of the cloned HTML node is None.
-                    // So...yeah, we expect ONLY the cnode's parent to be null
-                    // at the root node.
-                    if (node_parent == null || cnode_parent == null) {
-                        // We're back at the root element, so we've finished!
-                        break;
-                    }
+            // Increase the offset of the current tree level
+            istack[istack.length-1]++;
 
-                    ascend_parent = true;
-                }
+            if (node == null && cnode == null) {
+                // Ok, looks like there's no siblings, we need to go back
+                // up to the parent node.                     
+                ascend_parent = true;
+            }
+        }
+
+        if (ascend_parent) {
+            // Before we ascend, first test if we're already at the
+            // root node (and hence have completed the diff)
+            // HACK: The parent of an actual HTML node is the Document
+            // node, while the parent of the cloned HTML node is None.
+            // So...yeah, we expect ONLY the cnode's parent to be null
+            // at the root node.
+            if (node_parent == null || cnode_parent == null) {
+                // We're back at the root element, so we've finished!
+                break;
             }
 
-            if (ascend_parent) {
-                // Ok, go back up the parent
-                node = node_parent;
-                cnode = cnode_parent;
-                node_parent = node.parentNode;
-                cnode_parent = cnode.parentNode;
+            // Ok, actually go back up the parent
+            node = node_parent;
+            cnode = cnode_parent;
+            node_parent = node.parentNode;
+            cnode_parent = cnode.parentNode;
+            finished_traversing_children = true;
+            ascend_parent = false;
 
-                istack.pop();
+            // Pop the last item off our node path
+            istack.pop();
 
-                // This means we've finished comparing the parent node
-                finished_comparing_node = true;
-                ascend_parent = false;
-            }
-            else {
-                // Move onto the next sibling
-                istack[istack.length-1]++;
-                finished_comparing_node = false
-            }
         }
     }
     return diffs;

@@ -37,5 +37,12 @@ MirrorDom.Util.get_document_object_from_iframe = function(iframe) {
 /**
  * Checks whether we should ignore the node when building the tree
  */
-MirrorDom.Util.should_skip_node = function(node) {
+MirrorDom.Util.should_ignore_node = function(node) {
+    switch (node.nodeName) {
+        case "META":
+        case "SCRIPT":
+            return true;
+    }
+
+    return false;
 }
