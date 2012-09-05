@@ -14,8 +14,11 @@ MirrorDom.Broadcaster = function(options) {
     this.init(options);
 }
 
-// Class attributes...?
-MirrorDom.Broadcaster.PROP_NAMES = ["value", "checked"];
+// Property names
+MirrorDom.Broadcaster.prototype.PROPERTY_NAMES = ["disabled", "value", "checked", "style.cssText", "className"];
+MirrorDom.Broadcaster.prototype.IGNORE_ATTRIBS = {"style": null};
+MirrorDom.Broadcaster.prototype.PROPERTY_LOOKUP = 
+        MirrorDom.Util.process_property_paths(MirrorDom.Broadcaster.prototype.PROPERTY_NAMES);
 
 // Gets the jQuerified iframe object
 MirrorDom.Broadcaster.prototype.get_iframe = function(node) {
@@ -30,7 +33,7 @@ MirrorDom.Broadcaster.prototype.get_document_element = function() {
     return this.get_document_object().documentElement;
 }
 
-MirrorDom.Broadcaster.prototype.clone_node = function(node) {
+MirrorDom.Broadcaster.prototype.clone_node = function(node, include_properties) {
     // deep copy.
     var clone = {};
     clone.nodeName = node.nodeName;
@@ -40,7 +43,12 @@ MirrorDom.Broadcaster.prototype.clone_node = function(node) {
         for (var i=0; i < node.attributes.length; i++) {
             var attrib = node.attributes[i];
 
-            // IE thing
+            // IE thing 1
+            if (attrib.name in this.IGNORE_ATTRIBS) {
+                continue;
+            }
+
+            // IE thing 2
             if (attrib.specified) {
                 clone.attributes[attrib.name] = attrib.value;
             }
@@ -48,13 +56,29 @@ MirrorDom.Broadcaster.prototype.clone_node = function(node) {
     }
 
     // include properties that aren't reflected as DOM attributes
-    var prop_names = MirrorDom.Broadcaster.PROP_NAMES;
-    for (i=0; i < prop_names.length; i++) {
-        var name = prop_names[i];
-        if (name in node) {
-            clone.attributes[name] = node[name];
+    //var prop_names = MirrorDom.Broadcaster.PROP_NAMES;
+
+    if (include_properties) {
+        clone.props = {};
+        for (i=0; i < this.PROPERTY_LOOKUP.length; i++) {
+        //for (i=0; i < prop_names.length; i++) {
+            //var name = prop_names[i];
+            //if (name in node) {
+            //    clone.attributes[name] = node[name];
+            //}
+            var prop_text = this.PROPERTY_LOOKUP[i][0];
+            var prop_lookup = this.PROPERTY_LOOKUP[i][1];
+            var prop_result = MirrorDom.Util.get_property(node, prop_lookup);
+            var prop_found = prop_result[0];
+            var prop_value = prop_result[1];
+            if (prop_found) {
+                // MirrorDom.Util.set_property(clone, prop_lookup, prop_value, true);
+                clone.props[prop_text] = prop_value;
+                
+            }
         }
     }
+
     clone.nodeValue = node.nodeValue;
 
     return clone;
@@ -65,7 +89,9 @@ MirrorDom.Broadcaster.prototype.add_node_diff = function(diffs, ipath, node) {
         // element        
         diffs.push(['node', ipath.slice(), node.innerHTML, 
                 this.clone_node(node), 
-                this.get_nodes_with_properties(node)]);
+                //this.get_nodes_with_properties(node)]);
+                this.get_property_diffs(node)
+        ]);
     } else if (node.nodeType == 3) {
         // text node
         diffs.push(['text', ipath.slice(), node.textContent]);
@@ -94,7 +120,7 @@ MirrorDom.Broadcaster.prototype.add_node_diff = function(diffs, ipath, node) {
  * Note: dnode (aka actual node) always exists, cnode may not exist (indicating
  * a recently added node)
  *
- * Returns true if different, false if same
+ * Returns true if structurally different, false if same
  */
 MirrorDom.Broadcaster.prototype.compare_nodes = function(diffs, ipath, dnode, cnode) {
     if (!cnode) {
@@ -112,6 +138,11 @@ MirrorDom.Broadcaster.prototype.compare_nodes = function(diffs, ipath, dnode, cn
         return true;
     }
 
+    this.compare_node_attributes(diffs, ipath, dnode, cnode);
+    this.compare_node_properties(diffs, ipath, dnode, cnode);
+}
+
+MirrorDom.Broadcaster.prototype.compare_node_attributes = function(diffs, ipath, dnode, cnode) {    
     var diff_attribs = {};
     var dattribs = {};
 
@@ -120,73 +151,110 @@ MirrorDom.Broadcaster.prototype.compare_nodes = function(diffs, ipath, dnode, cn
     var key;
     var attrib;
 
-    //debugger;
+    var changed_attribs = {}
+    var removed_attribs = [];
 
-    if (dnode.attributes) {
-        // convert .attributes map to an object dict
-        for (var i=0; i < dnode.attributes.length; i++) {
-            // IE hack for "specified" attributes (otherwise it returns EVARYTING)
-            if (dnode.attributes[i].specified) {
-                dattribs[dnode.attributes[i].name] = dnode.attributes[i].nodeValue;  
-            }
-        }
-
-        // include properties that aren't reflected as DOM attributes
-        for (i=0; i < MirrorDom.Broadcaster.PROP_NAMES.length; i++) {
-            var name = MirrorDom.Broadcaster.PROP_NAMES[i];
-            if (name in dnode) {
-                dattribs[name] = dnode[name];
-            }
-        }
-
-        // any attribs been added/changed?
-        for (key in dattribs) {
-            attrib = dattribs[key];
-            //if (cattribs[key] != attrib) {
-
-            // Derek EXPERIMENTAL HACK: For some reason the attributes may have been stringified
-            //if (cattribs[key] != attrib && String(cattribs[key]) != String(attrib)) {
-            if (cattribs[key] != attrib) {
-                diff_attribs[key] = attrib;
-                diff = true;
-            }
-        }
+    if (dnode.attributes == null) {
+        //if (cnode.attributes != null) {
+        //    throw new Error("cnode has attributes but dnode doesn't?");
+        //}
+        return false;
     }
 
-    // any attribs been removed?
-    for (key in cattribs) {
-        if (!cattribs[key].specified) {
+    // convert .attributes map to an object dict
+    for (var i = 0; i < dnode.attributes.length; i++) {
+
+        // For Internet Explorer: style attrib is always null
+        if (dnode.attributes[i].name in this.IGNORE_ATTRIBS) {
             continue;
         }
 
-        if (dattribs) {
-            attrib = dattribs[key];
-        }
-        // if (!dattribs || (attrib != cattribs[key] && String(attrib) != String(cattribs[key]))) {
-
-        if (!dattribs || (attrib != cattribs[key])) {
-            if (attrib) {
-                diff_attribs[key] = attrib;
-            } else {
-                diff_attribs[key] = null;
-            }
+        // IE hack for "specified" attributes (where .attributes contains
+        // the entire set of possible attributes)
+        if (!dnode.attributes[i].specified) { continue; }
+        var dattrib_name = dnode.attributes[i].name;
+        var dattrib_value = dnode.attributes[i].nodeValue;
+        if (dattrib_value != cattribs[dattrib_name]) {
+            // Either it's been changed or it was added
+            changed_attribs[dattrib_name] = dattrib_value;
             diff = true;
         }
     }
 
+    // Any attribs been removed?
+    // Note: cnode is just a straight up associative dict object (see
+    // clone_node()).
+    for (var key in cnode.attributes) {
+        
+        // For Internet Explorer: style attrib is always null
+        if (key in this.IGNORE_ATTRIBS) {
+            continue;
+        }
+
+        // Note: Because of clone_node's attribute copying, the attribute
+        // values are actually attribute nodes. That might not be such a good
+        // thing? Maybe I'll have to fix that later
+        if (!cnode.attributes[key].specified) { continue; }
+        //var cattrib_name = cnode.attributes[key].name;
+        var cattrib_value = cnode.attributes[key].nodeValue;
+        if (dnode.attributes[key] == undefined) {
+            removed_attribs.push(cattrib_name);
+            diff = true;
+        }
+    }
 
     if (diff) {
-        diffs.push(['attribs', ipath.slice(), diff_attribs]);
-        return false;
+        diffs.push(['attribs', ipath.slice(), changed_attribs, removed_attribs]);
+        return true;
     }
 
     return false;
 };
 
+/**
+ * @param cnode         Node cloned in clone_node() (not an actual DOM node)
+ */
+MirrorDom.Broadcaster.prototype.compare_node_properties = function(diffs, ipath, dnode, cnode) {    
+    var changed_props = {};
+    var removed_props = [];
+    var diff = false;
+
+    // include properties that aren't reflected as DOM attributes
+    for (i=0; i < this.PROPERTY_LOOKUP.length; i++) {
+        var prop_text = this.PROPERTY_LOOKUP[i][0];
+        var prop_lookup = this.PROPERTY_LOOKUP[i][1];
+        var dprop_result = MirrorDom.Util.get_property(dnode, prop_lookup);
+        var dprop_found = dprop_result[0];
+        var dprop_value = dprop_result[1];
+
+        var cprop_found = prop_text in cnode.props;
+        var cprop_value = cnode.props[prop_text];
+
+        if (dprop_found && !cprop_found) {
+            // Property added
+            changed_props[prop_text] = dprop_value;          
+            diff = true;
+        } else if (!dprop_found && cprop_found) {
+            // Property removed
+            removed_props.push(prop_text);
+            diff = true;
+        } else if (dprop_value != cprop_value) {
+            // Property changed
+            changed_props[prop_text] = dprop_value;          
+            diff = true;
+        }
+    }
+
+    if (diff) {
+        diffs.push(['props', ipath.slice(), changed_props, removed_props]);
+        return true;
+    }
+
+    return false;
+}
+
 MirrorDom.Broadcaster.prototype.diff_dom2 = function(dom_root, cloned_root) {
     var startTime = new Date().getTime();
-    var node = dom_root;
-    var cnode = cloned_root;
 
     // istack contains our current position in the tree. This is basically a
     // list of node offsets. Each entry in the list corresponds to a level of
@@ -216,44 +284,48 @@ MirrorDom.Broadcaster.prototype.diff_dom2 = function(dom_root, cloned_root) {
     //
     var istack = [];
 
-    // The collection of diff directives to transmit to the mirrordom server 
+    // Diff directives to transmit to the mirrordom server 
     var diffs = [];
 
-    // Alright, before we start:
-    //
-    // I'm going to introduce the terminology "actual" and "cloned" in the
-    // following comments.
-    //
+    // We have an "actual" and "cloned" tree being traversed in lockstep:
     // Actual: The current DOM being viewed in the browser
     // Cloned: A representation of the previous state of the DOM at
     //         the time we did our last diff.
 
-    // Step 1 when visiting a node is to compare the node's tagNames and
-    // attributes. Step 2 is to iterate through the node's children, and Step 3
-    // is to traverse onto the next sibling - or, if no more siblings, then up
-    // to the parent.
 
-    // This variable is set to false when first visiting a node, and true
-    // when exiting (i.e. ready to traverse).
-    var finished_traversing_children = false;
+    // Used to indicate when we've finished traversing a node's children and
+    // need to go back up.
     var ascend_parent = false;
 
-    // Keep tabs on the parents
+    // Which nodes are being compared at the start of each iteration
+    var node = dom_root;
+    var cnode = cloned_root;
+
+    // Keep references of the current node's parents
     var node_parent = null;
     var cnode_parent = null;
    
-
     while (true) {
-        // Loop philosophy: Basically at the start of each loop we have to
-        // compare the values of node and cnode. "node" represents a node from
-        // the actual tree, and "cnode" represents a node from the cloned tree.
+        // At the start of each loop we have to compare the values of node and
+        // cnode. "node" represents a node from the actual tree, and "cnode"
+        // represents a node from the cloned tree.  Initially the node and
+        // cnodes are set to the root of their respective trees.
         //
-        // At the end of the loop, "node" and "cnode" are advanced onto the
+        // We're doing a depth-first search using firstChild, nextSibling and
+        // parentNode to traverse instead of more traditional stack based
+        // techniques.
+        //
+        // At the end of the loop, "node" and "cnode" are traversed onto the
         // next nodes that we need to compare, at which point we start a new
         // iteration. 
-        //
-        // The following scenarios are possible with regards to "cnode" and
-        // "node":
+
+        // Step 1 when visiting a node is to compare the node's tagNames and
+        // attributes. 
+        // Step 2 is to iterate through the node's children
+        // Step 3 is to traverse onto the next sibling - or, if no more
+        // siblings, then up to the parent.
+
+        // Let's compare the nodes. The following scenarios are possible:
         // 1) "cnode" does not exist, but "node" does. This indicates recently
         //    added nodes.
         // 2) "node" does not exist, but "cnode" does. This indicates recently
@@ -261,329 +333,196 @@ MirrorDom.Broadcaster.prototype.diff_dom2 = function(dom_root, cloned_root) {
         // 3) Both "cnode" and "node" exist, so we're going to have to compare
         //    their values and traverse children.
         //
-
-        // IMPORTANT: We need to ignore certain node types as they will have
-        // been stripped out in the viewer DOM. This causes their node offsets
-        // to differ, so in order to compensate we need to skip certain nodes.
-        while (node != null && MirrorDom.Util.should_ignore_node(node)) {
-            node = node.nextSibling;    
-        }
-        while (cnode != null && MirrorDom.Util.should_ignore_node(cnode)) {
-            cnode = cnode.nextSibling;    
-        }
-
-        if (finished_traversing_children) {
-            // Scenario 4: We've just ascended into this node after traversing
-            // its children. Do nothing so we can traverse onto the next
-            // sibling.
-
-            // Reset back to false
-            finished_traversing_children = false;
+        // 4) Not really a scenario, but this occurs when we've just finished
+        //    traversing the nodes' children and need to resume traversing
+        //    siblings.
+        if (ascend_parent) {
+            // Senario 4) We've just completed an ascent from this node's children.
+            // At this point there's nothing to be done except traverse onto
+            // the sibling (or continue ascending if no more siblings)
+            //
+            // Traversing code is later in this loop logic.
+            ascend_parent = false;
         } else if (cnode == null) {
-            // Scenario 1: A node was added
+            // Scenario 1) A node was added recently
             while (node) {
-                istack[istack.length-1]++;
+                // Add a wholesale copy of the node and its children
                 this.add_node_diff(diffs, istack, node);
-                node = node.nextSibling;
-            }
 
-            // Go back up into parent
+                // Move to next node
+                node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+
+                // Increase last ipath element to represent next sibling. 
+                istack[istack.length-1]++;
+            }
+            // Finished with this node and its siblings, ascend back up
             ascend_parent = true;
         } else if (node == null) {
-            // Scenario 2: A node has been removed
+            // Scenario 2) A node was removed recently
+            // Add message to delete the node and all its children
             diffs.push(['deleted', istack.slice()]);
-
-            // Go back up into parent
+            // Finished with this node and its siblings, ascend back up
             ascend_parent = true;
         } else {
-
-            // Scenario 3: We have nodes we need to compare
+            // Scenario 3) We have nodes we need to compare
             // Compare the node tagNames, attributes, properties
             var changed = this.compare_nodes(diffs, istack, node, cnode);
-
             if (!changed) {
-                if (node.firstChild == null && cnode.firstChild == null) {
-                    // No children, let's proceed to the next sibling (below)
-                }
-                else {
-                    // Nodes are the same, traverse and compare the nodes' children
+                // The nodes appear to be the same, let's compare the children
+                if (node.firstChild != null || cnode.firstChild != null) {
+                    // At least one of the nodes has children, so we'll descend
                     node_parent = node;
                     cnode_parent = cnode;
-                    node = node.firstChild;
-                    cnode = cnode.firstChild;
-                    istack.push(0);
+                    node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
+                    cnode = MirrorDom.Util.apply_ignore_nodes(cnode.firstChild);
 
-                    // Begin new loop
+                    // Add 0 onto the istack path to represent visiting the
+                    // first child of the current node
+                    istack.push(0);
                     continue
                 }
             }
             else {
-                // Special case: The nodes are different, so compare_nodes has
-                // basically added an entire diff directive to reconstruct this
-                // node. We'll move onto the next node.
+                // Special case: The nodes are different, but compare_nodes()
+                // has basically added an entire diff directive to reconstruct
+                // this node in the viewers, so no further action is necessary.
+                // We'll move onto the next node.
             }
         }
 
-        // Finished comparing the node, perform traversal onto next sibling or parent
-        // Note: ascend_parent may have been set if we already know we want to go
-        // back up. Otherwise we'll try to move onto the next sibling, or
-        // if they don't exist then we'll go back up.
+        // Perform traversal onto next sibling or parent. If ascend_parent
+        // was set, that means we already know we want to go back up and we'll
+        // skip this bit.
         if (!ascend_parent) {
 
             // Move onto the next sibling
-            node = node.nextSibling;
-            cnode = cnode.nextSibling;
+            node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+            cnode = MirrorDom.Util.apply_ignore_nodes(cnode.nextSibling);
 
-            // Increase the offset of the current tree level
+            // Increase the last ipath element to represent the next sibling
             istack[istack.length-1]++;
 
             if (node == null && cnode == null) {
-                // Ok, looks like there's no siblings, we need to go back
-                // up to the parent node.                     
+                // No siblings remaining, go back up to the parent node.                     
                 ascend_parent = true;
             }
         }
 
         if (ascend_parent) {
-            // Before we ascend, first test if we're already at the
-            // root node (and hence have completed the diff)
-            // HACK: The parent of an actual HTML node is the Document
-            // node, while the parent of the cloned HTML node is None.
-            // So...yeah, we expect ONLY the cnode's parent to be null
-            // at the root node.
+            // Test if we're already at the root node and hence have completed
+            // the diff.
+            //
+            // Note: The parent of the actual HTML root is the Document node,
+            // while the parent of the cloned HTML node is null. So
+            // realistically, we are only checking for cnode_parent == null
             if (node_parent == null || cnode_parent == null) {
-                // We're back at the root element, so we've finished!
+                // We're back at the root element, so terminate the loop
                 break;
             }
 
-            // Ok, actually go back up the parent
+            // Parent traversal
             node = node_parent;
             cnode = cnode_parent;
             node_parent = node.parentNode;
             cnode_parent = cnode.parentNode;
-            finished_traversing_children = true;
-            ascend_parent = false;
 
-            // Pop the last item off our node path
+            // Pop the last item off our node path to represent going back up
+            // the tree
             istack.pop();
-
+            
+            // NOTE: We need to leave ascend_parent as true as an indicator
+            // that we've finished iterating through a node's children in the
+            // next iteration.
         }
     }
     return diffs;
 }
 
-MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
-    var startTime = new Date().getTime();
-    var node = dom_root;
-    var cnode = cloned_root;
-    var istack = [];
+/**
+ * Force obtain all css inline styles. This occurs in two situations:
+ *
+ * After the initial HTML dump, which may (IE) or may not (Firefox) represent
+ * updated CSS information.
+ *
+ * When obtaining the diff for a new/changed node, where we want to transport
+ * the relative properties within that tree.
+ *
+ * @param node      The node to diff from. If null, use document element.
+ *
+ * @returns         A list of diffs. The node paths in the diffs will be
+ *                  relative to the node param.
+ */
+MirrorDom.Broadcaster.prototype.get_property_diffs = function(node) {
+    if (node == null) {
+        node = this.get_document_element();
+    }
+    var ipath = [];
     var diffs = [];
 
+    // Indicates whether we've just finished visiting this node's children 
+    // and need to traverse to sibling 
+    var ascended_parent = false;
 
     while (true) {
 
-        // Alright, before we start:
-        //
-        // node is the current node we're focusing on
-        // cnode is the corresponding node from the cloned tree
-        //
-        // I'm going to introduce the terminology "actual" and "cloned" in the
-        // following comments.
-        //
-        // actual: The current DOM being viewed in the browser
-        // cloned: A representation of the previous state of the DOM at
-        //         the time we did our last diff.
-        //
-        // The strategy is to compare the actual and cloned trees to detect
-        // changes in the DOM since our last diff. At the end we'll update the
-        // cloned tree to prepare for the next diff.
-        // 
-        // We perform a lockstep tree traversal using the following order of
-        // traversal:
-        //
-        // 1) Down into the node's children
-        // 2) Across the node's siblings
-        // 3) Ascend into the node's uncles (I'll call this uncle ascent)
-        //
-        // So we're performing a depth first tree traversal. But it might look
-        // a bit weird though, as we're using firstChild, nextSibling and
-        // parentNode to traverse instead of more traditional stack based
-        // techniques.
-        
-           
-        // Traversal part 1: Child descent
-        // --------------------------------------------------------------------
-        //
-        // Node has a child, let's compare the children of this node and
-        // the cloned node. Possible scenarios are:
-        //
-        // 1) Actual node has a child, but cloned node does not: A new child
-        //   was recently added to the node
-        //
-        // 2) Actual node child and cloned node child are identical (does
-        //    not include children): We descend into child
-        //
-        // 3) Actual node child and cloned node child are different:
-        //    TODO: Explainme
-        //
-        // 4) Actual node has no child, but the cloned node does: Actual node
-        //    has had its child deleted, add diff entry to remove all
-        //    corresponding children
-        //
-        if (node.firstChild) {
+        if (!ascended_parent) {
 
-            if (!this.compare_nodes(diffs, istack.concat(0), 
-                    node.firstChild, cnode.firstChild)) {
-
-                // Child descent 2: Nodes identical, descend into children
-                istack.push(0);
-                node = node.firstChild;
-                cnode = cnode.firstChild;
-                continue;
-            }
-
-            // Child descent 3: We proceed to comparing siblings. 
-            // (Nodes are too different .. dont descend, drop to next clause)
-
-        } else if (cnode.firstChild) {
-            // Child descent 4: Node's child recently deleted (don't forget to
-            // check possible bug)
-            diffs.push(['deleted', istack.concat(0)]);
-        }
-
-        // Traversal part 2: Sibling traversal
-        // --------------------------------------------------------------------
-        // If we're here, that means we're about to go compare sibling nodes
-        // (i.e. the node to the immediate right of our current node)
-        //
-        // Here are the scenarios for that:
-        // 1) Siblings are different: Right now, we're going to be lazy and
-        //    iterate through all remaining siblings in order to perform a
-        //    wholesale replacement of ALL remaining siblings
-        //    Immediately proceed into traversal part 3 (uncle ascent)
-        //
-        //    Possible bug: If cloned node has more siblings than actual node, then
-        //                  applying the diff will leave extra siblings
-        //
-        // 1a) Actual node has sibling, but cloned node does not:
-        //    This indicates that sibling nodes were recently added.
-        //
-        //    Same codepath as 1, just iterate through all remaining actual
-        //    siblings and insert each one into diffs log.
-        //
-        //
-        // 2) Siblings are the same: Iterate into the sibling node (i.e. child
-        //    descent on that node and then sibling iteration)
-        //
-        // 3) Actual node has no sibling:
-        //    
-        //    We've reached the end of the siblings. It's possible that the
-        //    cloned node has further remaining siblings, indicating that the
-        //    actual node has had siblings recently removed.
-        //
-        //    a) Indicate deletion of any remaining cloned node siblings and
-        //       proceed into uncle ascent.
-
-        if (node.nextSibling) {
-            istack[istack.length-1]++;
-            if (this.compare_nodes(diffs, istack,
-                    node.nextSibling, cnode.nextSibling)) {
-
-                // Sibling traversal 1: Siblings are different OR
-                // Sibling traversal 1a: Actual node sibling has been recently added
-
-                // found different sibling; iterate through remainder 
-                // of siblings without checking the cloned tree (too hard)
-                // and add each to the diff list without descending
-                node = node.nextSibling;
-
-                while (node.nextSibling) {
-                    istack[istack.length-1]++;
-                    this.add_node_diff(diffs, istack, node.nextSibling);
-                    node = node.nextSibling;
-                }
-                // (drop through to next clause)
-
-            } else {
-                // Sibling traversal 2: Siblings match , proceed
-                node = node.nextSibling;
-                cnode = cnode.nextSibling;
-                continue;
-            }
-        }
-
-        // Sibling traversal 3 (well, sibling traversal 1 and 1a go through
-        // here too but this comment doesn't apply to those):
-        // 
-        // We've reached the end of the actual node's siblings, we need to
-        // ascend to the tree's uncle
-
-        // Traversal part 3: Uncle ascent
-        // --------------------------------------------------------------------
-        //
-        // We need to 
-
-        // tree ascent
-        while (true) {
-            // implicitly - !node.nextSibling && 
-            // (!node.firstChild || we are skipping the descent) , ascend
-            while (!node.nextSibling) {
-                if (node == dom_root) {
-                    return diffs;
-                }
-
-                if (cnode.nextSibling) {
-                    // cloned tree has a nextSibling, but its removed from the DOM
-                    diffs.push(['deleted', 
-                        istack.slice(0, istack.length-1).concat(
-                            istack[istack.length-1]+1)]);
-                }
-
-                istack.pop();
-                node = node.parentNode;
-                cnode = cnode.parentNode;
-            }
-
-            istack[istack.length-1]++;
-            if (this.compare_nodes(diffs, istack, node.nextSibling, 
-                        cnode.nextSibling)) 
-            {
-                // found different sibling; 
-                // iterate through remainder of siblings
-                node = node.nextSibling;
-                if (cnode.nextSibling) {
-                    cnode = cnode.nextSibling;
-                }
-
-                while (node.nextSibling) {
-                    istack[istack.length-1]++;
-                    this.add_node_diff(diffs, istack, node.nextSibling);
-                    node = node.nextSibling;
-                    if (cnode.nextSibling) {
-                        cnode = cnode.nextSibling;
+            // Element nodes only
+            if (node.nodeType == 1) {
+                // Let's go check the node
+                var changed_props = {}
+                var diff = false;
+                for (var i = 0; i < this.PROPERTY_LOOKUP.length; i++) {
+                    var prop_text = this.PROPERTY_LOOKUP[i][0];
+                    var prop_lookup = this.PROPERTY_LOOKUP[i][1];
+                    var prop_result = MirrorDom.Util.get_property(node, prop_lookup);
+                    var prop_found = prop_result[0];
+                    var prop_value = prop_result[1];
+                    if (prop_found && (prop_value != "" && prop_value != null)) {
+                        changed_props[prop_text] = prop_value;
+                        diff = true;
                     }
                 }
 
-                if (cnode.nextSibling) {
-                    // cloned tree has a nextSibling, but its removed from the DOM
-                    diffs.push(['deleted', 
-                        istack.slice(0, istack.length-1).concat(
-                            istack[istack.length-1]+1)]);
+                if (diff) {
+                    diffs.push(['props', ipath.slice(), changed_props, null]);
                 }
+            }
 
-                // resume ascent
+            // Traverse into child
+            var next_child = node.firstChild ? MirrorDom.Util.apply_ignore_nodes(node.firstChild) : null;
+            if (next_child != null) {
+                node = next_child;
+                ipath.push(0);
                 continue;
-            } else {
-                node = node.nextSibling;
-                cnode = cnode.nextSibling;
+            }
+
+        } else {
+            // We've just ascended, we want to traverse
+            ascended_parent = false;
+        }
+
+        // Try traverse into sibling
+        var next_sibling = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+        if (next_sibling != null) {
+            node = next_sibling;
+            ipath[ipath.length-1]++;
+        } else {
+            // Reached the end of siblings, ascend parent or terminate
+            node = node.parentNode;
+            ipath.pop();
+            
+            // Oh look, we've reached the end
+            if (ipath.length == 0) {
                 break;
             }
+
+            ascended_parent = true;
         }
     }
 
-    // unreachable?
     return diffs;
-};
+}
 
 /**
  * Returns a copy of a DOM tree
@@ -591,17 +530,17 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
 MirrorDom.Broadcaster.prototype.clone_dom = function(root) {
     var startTime = new Date().getTime();
     var node = root;
-    var cloned_node = this.clone_node(root);
+    var cloned_node = this.clone_node(root, true);
     var cloned_root = cloned_node;
     while (true) {
         if (node.firstChild) {
             node = node.firstChild;
-            cloned_node.firstChild = this.clone_node(node);
+            cloned_node.firstChild = this.clone_node(node, true);
             cloned_node.firstChild.parentNode = cloned_node;
             cloned_node = cloned_node.firstChild;
         } else if (node.nextSibling) {
             node = node.nextSibling;
-            cloned_node.nextSibling = this.clone_node(node);
+            cloned_node.nextSibling = this.clone_node(node, true);
             cloned_node.nextSibling.parentNode = cloned_node.parentNode;
             cloned_node = cloned_node.nextSibling;
         } else {
@@ -613,7 +552,7 @@ MirrorDom.Broadcaster.prototype.clone_dom = function(root) {
                 cloned_node = cloned_node.parentNode;
             }
             node = node.nextSibling;
-            cloned_node.nextSibling = this.clone_node(node);
+            cloned_node.nextSibling = this.clone_node(node, true);
             cloned_node.nextSibling.parentNode = cloned_node.parentNode;
             cloned_node = cloned_node.nextSibling;
         }
@@ -657,6 +596,9 @@ MirrorDom.Broadcaster.prototype.send_new_window = function() {
     var self = this;
     this.pusher.push("new_window", {
         "html": this.get_document_data(),
+        
+        // The HTML may not reflect the current properties and CSS
+        "props": this.get_property_diffs(null),
         "url": src
     },
     function(window_id) {
@@ -674,6 +616,9 @@ MirrorDom.Broadcaster.prototype.send_new_page_loaded = function() {
     this.pusher.push("reset", {
         "window_id": this.name,
         "html": this.get_document_data(),
+        
+        // The HTML may not reflect the current properties and CSS
+        "props": this.get_property_diffs(null),
         "url": src
     });
 }
@@ -691,14 +636,22 @@ MirrorDom.Broadcaster.prototype.poll = function() {
         console.log("still sending...")
         return;
     }
+
     console.log("POL!")
 
     if (this.is_new_window()) {
         this.send_new_window();
-    } else if (this.new_page_loaded) {
+    } else
+    if (this.new_page_loaded) {
         this.new_page_loaded = false;
         this.send_new_page_loaded();
-    } else {
+
+        //if (this.is_new_window()) {
+        //    this.send_new_window();
+        //} else {
+        //    this.send_new_page_loaded();
+        //}
+    } else if (!this.is_new_window()) {
         // send difference between now and the cloned dom
         var diff = this.get_diff();
         var self = this;
@@ -783,6 +736,17 @@ MirrorDom.Broadcaster.prototype.get_nodes_with_properties = function(dom_root) {
     }
     // unreachable
     return null;
+};
+
+MirrorDom.Broadcaster.prototype.node_at_path = function(root, ipath) {
+    var node = root;
+    for (var i=0; i < ipath.length; i++) {
+        node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
+        for (var j=0; j < ipath[i]; j++) {
+            node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+        }
+    }
+    return node;
 };
 
 /**

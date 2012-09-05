@@ -1,0 +1,108 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="../../js/broadcaster.js"></script>
+    <script type="text/javascript" src="../../js/viewer.js"></script>
+    <script type="text/javascript" src="test_util.js"></script>
+    <script type="text/javascript" >
+      var broadcaster_iframe = null;
+      var viewer_iframe = null;
+      var broadcaster = null;
+      var viewer = null;
+
+      // Initialisation
+      jQuery(document).ready(function() {
+          broadcaster_iframe = document.getElementById("source_iframe");          
+          viewer_iframe = document.getElementById("dest_iframe");          
+          broadcaster = new MirrorDom.Broadcaster({
+              iframe: broadcaster_iframe
+          });
+
+          viewer = new MirrorDom.Viewer({
+              iframe: viewer_iframe
+          });
+      });
+
+      // --------------- TESTS -------------------
+
+      // Test 1: Test the inner HTML operations (this should always work?)
+      function test_initial_tree() {
+          var src_html = broadcaster.get_entire_document();
+          console.log("Head: ", src_html[0]);
+          console.log("Body: ", src_html[1]);
+          var de = viewer.get_output_document().documentElement;
+          viewer.apply_document(de, src_html);
+      }
+
+      // Test 2: Test a diff HTML operation
+      function test_add_table_row() {
+          // Calling a function defined in test_dom_sync_content.html
+          broadcaster_iframe.contentWindow.add_table_row();
+          apply_diff();
+      }
+
+      // Test 3: Test a diff HTML operation
+      function test_remove_table_row() {
+          // Calling a function defined in test_dom_sync_content.html
+          broadcaster_iframe.contentWindow.remove_table_row();
+          apply_diff();
+      }
+
+      // Test 4: Change text input
+      function test_change_text_input() {
+          broadcaster_iframe.contentWindow.change_text_input();
+          apply_diff();
+      }
+
+      // Test 5: Change css styles
+      function test_change_styles() {
+          broadcaster_iframe.contentWindow.change_styles();
+          debugger;
+          apply_diff();
+      }
+
+      // Test 6: Check page has loaded
+      function test_page_loaded() {
+      }
+
+      // ------------- END TESTS -----------------
+
+      function apply_diff() {
+          // Now get changes
+          var diff = broadcaster.get_diff();
+          console.log("Diff: " + diff);
+
+          // Now apply changes
+          var de = viewer.get_output_document().documentElement;
+          viewer.apply_diffs(de, diff);
+      }
+
+      // The following functions are used for doing the testing verification
+      function get_src_html() {
+          return MDTestUtil.get_html(broadcaster_iframe);
+      }
+
+      function get_dest_html() {
+          return MDTestUtil.get_html(viewer_iframe);
+      }
+
+    </script>
+  </head>
+  <body>
+    <iframe id="source_iframe" src="test_dom_sync_content.html" style="width: 100%; height: 200px"></iframe>
+    <iframe id="dest_iframe"  style="width: 100%; height: 200px"></iframe>
+
+    <!-- Manually invoke test operations here, you don't have to add every
+         automated test function, just the ones for which manual verification
+         is useful -->
+    <a href="javascript:test_initial_tree();">Test init_html transfer</a><br/>
+    <a href="javascript:test_add_table_row();">Test add element</a><br/>
+    <a href="javascript:test_remove_table_row();">Test remove element</a><br/>
+    <a href="javascript:test_change_text_input();">Test change text</a><br/>
+    <a href="javascript:test_change_styles();">Test change styles</a><br/>
+    <a href="javascript:apply_diff();">Arbitrary apply diff</a><br/>
+
+    <a href="javascript:var html = get_src_html();void(console.log(html));">Test get HTML</a><br/>
+  </body>
+</html>

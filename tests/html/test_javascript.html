@@ -15,8 +15,8 @@
 
       // Initialisation
       jQuery(document).ready(function() {
-          broadcaster_iframe = document.getElementById("source_iframe");          
-          viewer_iframe = document.getElementById("dest_iframe");          
+          broadcaster_iframe = document.getElementById("broadcaster_iframe");          
+          viewer_iframe = document.getElementById("viewer_iframe");          
           broadcaster = new MirrorDom.Broadcaster({
               iframe: broadcaster_iframe
           });
@@ -38,24 +38,63 @@
 
       // Test 2: Test apply html
       // ------------------------------------------
-
       function test_2_apply_document(result) {
           viewer.apply_document(result); 
       }
 
-      // ---------- Test 2: Test apply html ------------
-      function test_2_modify_broadcaster_document() {
+      // Test 3: Test get diff
+      // ------------------------------------------
+      function test_3_modify_broadcaster_document_with_add_node() {
           broadcaster_iframe.contentWindow.add_div();
       }
 
-      function test_2_get_broadcaster_diff() {
-          debugger;
+      function test_3_get_broadcaster_diff() {
           var diff = broadcaster.get_diff();
+
+          // Returns JSONified diff
           return JSON.stringify(diff);
       }
 
+      // Test 4: Test apply diff
+      // ------------------------------------------
+      function test_4_setup_viewer_document() {
+          viewer_iframe.src = "test_javascript_content_sanitised.html";
+      }
 
-      // ---------- End Test 2       ------------
+      function test_4_apply_viewer_diff(diff) {
+          var d = JSON.parse(diff);
+          viewer.apply_diffs(null, d);
+      }
+
+      // Test 5: Test get initial property dump
+      function test_5_get_broadcaster_all_property_diff() {
+          var diffs = broadcaster.get_property_diffs();
+          return JSON.stringify(diffs);
+      }
+
+      // Test 6: Test get diff with dynamic class/style change
+      // ------------------------------------------
+      function test_6_modify_broadcaster_document_with_css() {
+          broadcaster_iframe.contentWindow.change_some_css();
+      }
+
+      // Test 7: Test get diff with attribute change
+      // ------------------------------------------
+      function test_7_modify_broadcaster_document_with_attribute() {
+          broadcaster_iframe.contentWindow.change_some_attribute();
+      }
+
+      // Test 8: Test get diff with property change
+      // ------------------------------------------
+      //function test_8_modify_broadcaster_document_with_property() {
+      //    broadcaster_iframe.contentWindow.change_some_property();
+      //}
+
+      // Test 9: Test get diff with deleting nodes
+      // ------------------------------------------
+      function test_9_modify_broadcaster_document_with_delete_node() {
+          broadcaster_iframe.contentWindow.delete_div();
+      }
 
       // *************** END TESTS *****************
 
@@ -98,27 +137,56 @@
           </table> \
         </div> \
         <div> \
-          <input id="text_input" length="50" type="text" value="hello"></input> \
+          <input id="thetextinput" length="50" type="text" value="hello"></input> \
         </div> \
-        <a href="test_dom_sync_content2.html">Page 2</a> \
+        <a href="test_javascript_content2.html">Page 2</a> \
       </body> \
     </html>';
           viewer.apply_document(html);
       }
 
+      function manual_get_property_diffs() {
+          debugger;
+          var diffs = broadcaster.get_property_diffs();
+          console.log("Diffs: " + diffs);
+      } 
+
       function manual_diff() {
           test_1_get_broadcaster_document();
-          test_2_modify_broadcaster_document();
-          test_2_get_broadcaster_diff();
+          test_3_modify_broadcaster_document_with_add_node();
+          debugger;
+          var diff = test_3_get_broadcaster_diff();
+          console.log("Diff: " + JSON.stringify(diff));
+      }
+
+      function manual_apply_diff() {
+          var DIFF = '[["node", [1, 4], "Hello There", {"attributes": {"style": "background-color: red;"}, "nodeType": 1, "nodeName": "DIV", "nodeValue": null}, []]]'
+          test_4_setup_viewer_document();
+
+          window.setTimeout(function() {
+            debugger;
+            test_4_apply_viewer_diff(DIFF);
+          }, 1000);
+      }
+
+      function manual_apply_diff_css() {
+          test_1_get_broadcaster_document();
+          test_6_modify_broadcaster_document_with_css();
+          debugger;
+          var diff = test_3_get_broadcaster_diff();
+          console.log("Diff: " + JSON.stringify(diff));
       }
 
     </script>
   </head>
   <body>
-    <iframe id="source_iframe" src="test_javascript_content.html" style="width: 100%; height: 200px"></iframe>
-    <iframe id="dest_iframe" src="blank.html" style="width: 100%; height: 200px"></iframe>
+    <iframe id="broadcaster_iframe" name="broadcaster_iframe" src="test_javascript_content.html" style="width: 100%; height: 200px"></iframe>
+    <iframe id="viewer_iframe" name="viewer_iframe" src="blank.html" style="width: 100%; height: 200px"></iframe>
 
     <a href="javascript:manual_dump()">Manual dump!</a><br/>
-    <a href="javascript:manual_diff()">Manual diff!</a>
+    <a href="javascript:manual_get_property_diffs()">Manual get ALL property diffs!</a><br/>
+    <a href="javascript:manual_diff()">Manual diff!</a><br/>
+    <a href="javascript:manual_apply_diff()">Manual apply diff!</a><br/>
+    <a href="javascript:manual_apply_diff_css()">Manual get diff with css!</a>
   </body>
 </html>

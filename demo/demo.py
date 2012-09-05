@@ -87,11 +87,13 @@ def handle_mirrordom(name):
         result = mirrordom.server.handle_get_update(mirrordom_storage,
                 change_ids=json.loads(query["change_ids"]))
     elif name == "new_window":
+        prop_diffs = json.loads(query["props"])
         result = mirrordom.server.handle_new_window(mirrordom_storage,
-                html=query["html"], url=query["url"])
+                query["html"], prop_diffs, query["url"])
     elif name == "reset":
+        prop_diffs = json.loads(query["props"])
         result = mirrordom.server.handle_reset(mirrordom_storage,
-                query["window_id"], query["html"], query["url"])
+                query["window_id"], query["html"], prop_diffs, query["url"])
 
     else:
         result = getattr(mirrordom.server, "handle_" + name)(mirrordom_storage, **query)

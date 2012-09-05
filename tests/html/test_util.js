@@ -10,6 +10,9 @@ var MDTestUtil = {
         else if (iframe.contentWindow) {
             // IE
             d = iframe.contentWindow.contentDocument;
+            if (d == undefined) {
+                d = iframe.contentWindow.document;
+            }
         }
         else {
             console.log("What the hell happened");

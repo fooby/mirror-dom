@@ -57,9 +57,15 @@ class Changelog(object):
 def _get_html_cleaner():
     cleaner = lxml.html.clean.Cleaner()
     cleaner.frames = False
+    cleaner.links = False
     cleaner.forms = False
+    cleaner.style = False
     cleaner.page_structure = False
-    #cleaner.style = False
+    cleaner.scripts = True
+    cleaner.embedded = False
+
+    # If True, the cleaner will wipe out <link> elements
+    cleaner.javascript = False
     return cleaner
 
 def sanitise_document(html):
@@ -78,6 +84,8 @@ def sanitise_document(html):
     temp = lxml.html.tostring(html_tree)
     final_html_tree = lxml.html.fromstring(temp)
     cleaner = _get_html_cleaner()
+    #import rpdb2
+    #rpdb2.start_embedded_debugger("hello")
     cleaner(final_html_tree)
     return lxml.etree.tostring(final_html_tree)
 
@@ -88,7 +96,7 @@ def create_storage():
     """
     return {}
 
-def handle_new_window(storage, html, url):
+def handle_new_window(storage, html, props, url):
     """
     called by the client to create a new sharing session in a new window. we
     individually track each window the client has open in session local storage.
@@ -97,6 +105,10 @@ def handle_new_window(storage, html, url):
 
     :param html:    Yeah, this is no longer a string. It's something weird
                     now!
+                    Update: Nope, it's a string again
+
+    :param props:   Properties to apply to the document, as it's not reflected
+                    in innerHTML. List of diffs
     """
 
     #window_id = str(uuid.uuid1())
@@ -106,16 +118,21 @@ def handle_new_window(storage, html, url):
     # Ayup, we're going to clean nasties out of the HTML
     html = sanitise_document(html)
     window_id = "lol"
-    storage["window-%s" % window_id] = Changelog(html, 0)
+    storage["window-%s" % window_id] = changelog = Changelog(html, 0)
+    changelog.add_diff(props)
     return window_id
 
-def handle_reset(storage, window_id, html, url):
+def handle_reset(storage, window_id, html, props, url):
     """
     called by the client to reset the changelog with a full html snapshot
 
     this might be because the client navigated to a new page, or because
     the number of changesets accumulated above a certain threshold, after
     which we reset the changelog
+
+    :param html:    InnerHTML dump
+    :param props:   Properties to apply to the document, as it's not reflected
+                    in innerHTML. List of diffs
 
     returns the change_id of the new changelog created
     """
@@ -136,8 +153,8 @@ def handle_reset(storage, window_id, html, url):
 
     html = sanitise_document(html)
     # overwrite previous changelog
-    storage["window-%s" % window_id] = Changelog(html, first_change_id)
-
+    storage["window-%s" % window_id] = changelog = Changelog(html, first_change_id)
+    changelog.add_diff(props)
     return first_change_id
 
 def handle_add_diff(storage, window_id, diff):

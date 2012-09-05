@@ -11,12 +11,6 @@
             return a[i];
         }
 
-        function add_div() {
-            var div = jQuery("<div/>").appendTo(jQuery('body'));
-            div.text("Hello " + pick_random_item(text));
-            div.css('background-color', pick_random_item(colour));
-        }
-
         function add_table_row() {
             var table = jQuery("table");
             var s = pick_random_item(text);
@@ -33,22 +27,17 @@
             row.remove();
         }
 
-        function change_thetextinput() {
-            var text = jQuery("#thetextinput");
+        function change_text_input() {
+            var text = jQuery("#text_input");
             text.val("bye");
         }
 
-        function change_some_css() {
+        function change_styles() {
             var table = jQuery("#thetable");
             table.css("background-color", "purple");
 
             var h1s = jQuery("h1");
             h1s.css("font-style", "italic");
-        }
-
-        function change_some_property() {
-            var input = jQuery("#thetextinput");
-            input.prop("disabled", true);
         }
 
     </script>
@@ -59,8 +48,6 @@
   </head>
   <body>
     <h1>Hello world!</h1>
-
-    <!-- Here lies a comment -->
     <div>
       Blaurgh
       <table id="thetable" style="border: 1px solid black;">
@@ -80,14 +67,9 @@
     </div>
 
     <div>
-      <input id="thetextinput" type="text" length="50" value="hello"></input>
+      <input id="text_input" type="text" length="50" value="hello"></input>
     </div>
-
-    <iframe name="theiframe" id="theiframe"></iframe>
 
     <a href="test_dom_sync_content2.html">Page 2</a>
-
-    <div id="thelastelement">
-    </div>
   </body>
 </html>

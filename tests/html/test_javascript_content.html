@@ -16,6 +16,29 @@
             div.text("Hello " + pick_random_item(text));
             div.css('background-color', pick_random_item(colour));
         }
+
+        function change_some_css() {
+            var div = jQuery("#thediv");
+            div.css('background-color', 'pink');
+
+            var table = jQuery("#thetable");
+            table.addClass("nooclass");
+        }
+
+        function change_some_attribute() {
+            var table = jQuery("#thetable");
+            table.attr("cellspacing", "4");
+        }
+
+        function change_some_property() {
+            var input = jQuery("#thetextinput");
+            input.prop("disabled", true);
+        }
+
+        function delete_div() {
+            var div = jQuery("#thediv");
+            div.remove();
+        }
     </script>
     <style type="text/css">
       table { border-collapse: collapse; }
@@ -24,7 +47,9 @@
   </head>
   <body>
     <h1>Hello world!</h1>
-    <div>
+    <!-- Here lies a comment -->
+    <div id="thediv">
+      <!-- Here lies another comment -->
       Blaurgh
       <table id="thetable" style="border: 1px solid black;">
         <tr>
@@ -42,10 +67,17 @@
       </table>
     </div>
 
+    <script type="text/javascript">
+        // Code should really be ignoring this node
+        null;
+    </script>
+
     <div>
-      <input id="text_input" type="text" length="50" value="hello"></input>
+      <input id="thetextinput" type="text" size="30" value="hello"></input>
     </div>
 
-    <a href="test_dom_sync_content2.html">Page 2</a>
+    <a href="test_javascript_content2.html">Page 2</a>
+
+    <div id="thelastelement">This is the last element</div>
   </body>
 </html>
