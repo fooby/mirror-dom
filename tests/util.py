@@ -1,5 +1,6 @@
 import os
 import urllib
+import urlparse
 import html5lib
 import SimpleHTTPServer
 import SocketServer
@@ -13,6 +14,24 @@ import lxml.html
 import lxml.html.clean
 #import lxml.html.soupparser
 import lxml.html.html5parser
+
+# SO EVIL HACK: We replace an import of "lxml.etree as etree" in
+# html5.treebuilders.etree_lxml. 
+#
+# The end result is that lxml.html.html5parser returns lxml.html elements
+# instead of lxml.etree elements, which are basically the same thing but with
+# additional html specific features tacked on, and these can also be with the
+# lxml.html.clean functionality.
+#
+# Otherwise if we don't do this hack, we'll have to convert from lxml.etree elements
+# to lxml.html elements by dumping the document out into a string and then
+# parsing it again with lxml.html.
+
+USE_EVIL_HTML5LIB_LXML_HTML_HACK = False
+if USE_EVIL_HTML5LIB_LXML_HTML_HACK:
+    html5lib.treebuilders.etree_lxml.etree = lxml.html
+    lxml.html.Comment = lxml.html.HtmlComment
+
 import lxml.etree
 from selenium import webdriver
 
@@ -156,21 +175,47 @@ def get_debug_ie_webdriver():
     log_level = "DEBUG"
     return webdriver.Ie(log_level=log_level, log_file=ie_log)
 
-class XMLCompareException(Exception):
-    pass
+# -----------------------------------------------------------------------------
+# XML hacks
+# -----------------------------------------------------------------------------
+
+# LHTMLOutputChecker hack: Force the comparator use the html5lib parser
+# instead of the lxml.html parser (is this still needed? not sure)
 
 def parse_html_string(s):
+    """ LHTMLOutputChecker hack part 1 """
     parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
     return lxml.html.html5parser.fromstring(s, parser=parser)
 
 class LHTML5OutputChecker(lxml.doctestcompare.LHTMLOutputChecker):
     def get_parser(self, want, got, optionflags):
+        """ LHTMLOutputChecker hack part 2 """
         return parse_html_string
 
+# SO EVIL HACK part 2: Fallback behaviour if we have to stop using the hack
+# (set USE_EVIL_HTML5LIB_LXML_HTML_HACK to False at the top of this module)
 
-    #def compare_docs(self, want, got):
-    #    """ Mega hack, this makes irreversible changes to the tree! """
-    #    lxml.doctestcompare.LHTMLOutputChecker.compare_docs(self, want, got)
+def convert_to_lxml_html(doc):
+    """
+    As a result of calling lxml.html.html5parser.fromstring, we have
+    lxml.etree._Element instances. We want lxml.html.Element instances. The
+    only way to do this is to dump to string and re-parse with
+    lxml.html.fromstring!
+
+    Note: If USE_EVIL_HTML5LIB_LXML_HTML_HACK is True, then we'll probably
+    already have lxml.html.Element instances and this function won't do
+    anything.
+    """
+    if isinstance(doc, lxml.html.HtmlElement):
+        #print "Already html element!"
+        return doc
+    else:
+        #print "Converting document to lxml.html elements! (%s)" % (doc.__class__)
+        pass
+
+    result = lxml.html.fromstring(lxml.html.tostring(doc))
+    #print "returning %s" % (result.__class__)
+    return result
 
 # -----------------------------------------------------------------------------
 
@@ -204,8 +249,29 @@ def augment_single_node_defaults_for_ie(node):
             node.attrib[attribute] = value
             
 def augment_tree_defaults_for_ie(root):
+    """ In place tree modification """
     for element in root.iter():
         augment_single_node_defaults_for_ie(element)
+
+def strip_localhost_hrefs_for_ie(doc):
+    # rewrite_links only defined on HtmlElement
+    assert isinstance(doc, lxml.html.HtmlElement)
+
+    def strip_hostname(url):
+        parsed = urlparse.urlparse(url)
+        if parsed.hostname == "127.0.0.1":
+            result = "".join(parsed[2:]).lstrip("/")
+            #print "Got %s, return %s" % (url, result)
+            return result
+        else:
+            #print "Got %s, not doing anything" % (url)
+            return url
+    doc.rewrite_links(strip_hostname)
+
+def remove_title_for_ie(doc):
+    head = doc.find('head/title')
+    if head is not None:
+        head.getparent().remove(head)
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
@@ -223,20 +289,37 @@ class TestBase(object):
         return cleaner
 
 
-    def compare_html(self, want, got, augment_defaults_for_ie=True,
-            strip_style_attributes=True, clean=False):
+    def compare_html(self, want, got,
+            should_augment_defaults_for_ie=True,
+            should_strip_localhost_hrefs_for_ie=True,
+            should_remove_title_for_ie=True,
+            strip_style_attributes=True,
+            clean=False):
         """
         Yep, compare two target documents together
 
         :param want:    The "template" HTML we're matching against
         :param got:     The output HTML we got from our test
-        :param augment_defaults_for_ie:
+        :param should_augment_defaults_for_ie:
                         Force default attributes onto various nodes to
                         compensate for IE removing attributes at whim
 
                         e.g. All <input> elements without a "type" attribute
                         will get a type="text" attribute forcibly added before
                         the compare
+
+        :param should_strip_localhost_hrefs_for_ie:
+                        IE hrefs tend to prefix with the hostname. This messes
+                        with our comparison, so strip the hostname prefixs. e.g.
+
+                        <a href="http://127.0.0.1:49602/test_dom_sync_content2.html">
+                        will be fixed to
+                        <a href="test_dom_sync_content2.html">
+
+        :param should_remove_title_for_ie:
+                        IE tends to remove any text inside the <title> element,
+                        causing mismatches. We'll just remove it from our
+                        compare documents.
 
         :param strip_style_attributes:
                         IE's style attributes are unworkable for comparison
@@ -249,9 +332,22 @@ class TestBase(object):
         want_doc = parse_html_string(want)
         got_doc = parse_html_string(got)
 
-        if augment_defaults_for_ie:
+        # Convert lxml.etree._Element tree to lxml.html.HtmlElement tree as we
+        # want to use a bunch of lxml.html functionality.
+        want_doc = convert_to_lxml_html(want_doc)
+        got_doc = convert_to_lxml_html(got_doc)
+
+        if should_augment_defaults_for_ie:
             augment_tree_defaults_for_ie(want_doc)
             augment_tree_defaults_for_ie(got_doc)
+
+        if should_strip_localhost_hrefs_for_ie:
+            strip_localhost_hrefs_for_ie(want_doc)
+            strip_localhost_hrefs_for_ie(got_doc)
+
+        if should_remove_title_for_ie:
+            remove_title_for_ie(want_doc)
+            remove_title_for_ie(got_doc)
 
         if strip_style_attributes:
             lxml.etree.strip_attributes(want_doc, "style")
@@ -266,8 +362,8 @@ class TestBase(object):
             # injecting <tbody>s between <tables> and <trs>, hence this
             # "useless" operation.
             cleaner = self.get_html_cleaner()
-            want_doc = lxml.html.fromstring(lxml.html.tostring(want_doc))
-            got_doc = lxml.html.fromstring(lxml.html.tostring(want_doc))
+            #want_doc = convert_to_lxml_html(want_doc)
+            #got_doc = convert_to_lxml_html(got_doc)
             cleaner(want_doc)
             cleaner(got_doc)
 
@@ -313,8 +409,12 @@ class TestBrowserBase(TestBase):
         #raise Exception("Must override this method")
 
         if cls._webdriver:
-            print "Killing webdriver %s!" % (cls._webdriver)
-            cls._webdriver.quit()
+            if os.environ.get("KEEP_WEBDRIVER_ALIVE") == "1":
+                print "Keeping webdriver %s alive!" % (cls._webdriver)
+            else:
+                print "Killing webdriver %s!" % (cls._webdriver)
+                cls._webdriver.quit()
+
             # Set to None to prevent multiple instances of this class to be run
             # sequentially
             cls._webdriver = None
@@ -344,6 +444,14 @@ class TestBrowserBase(TestBase):
 # Diff comparison utilities
 # -----------------------------------------------------------------------------
 
+def diff_extract(diff):
+    if len(diff) == 3:
+        type, path, added = diff
+        return type, path, added, None
+    elif len(diff) == 4:
+        type, path, added, removed = diff
+        return type, path, added, removed
+
 def diff_contains_changed_property_key(diffs, s):
     """
     Check if a certain property was changed, but ignore the value.
@@ -359,7 +467,7 @@ def diff_contains_changed_property_key(diffs, s):
             return False
         return any(value in v.lower() for v in lst)
     return any(dict_key_contains(added, s) or list_contains(removed, s) \
-            for _, _, added, removed in prop_diffs)
+            for _, _, added, removed in map(diff_extract, prop_diffs))
 
 
 def diff_contains_changed_property_value(diffs, s):
@@ -376,7 +484,7 @@ def diff_contains_changed_property_value(diffs, s):
         return any(value in v.lower() for v in dct.itervalues() \
                 if isinstance(v, basestring))
     return any(dict_value_contains(added, s) \
-            for _, _, added, removed in prop_diffs)
+            for _, _, added, removed in map(diff_extract, prop_diffs))
 
 
 def diff_contains_changed_attribute(diffs, s):
@@ -396,7 +504,7 @@ def diff_contains_changed_attribute(diffs, s):
         return any(value in v.lower() for v in lst)
 
     return any(dict_key_contains(added, s) or list_contains(removed, s) \
-            for _, _, added, removed in attr_diffs)
+            for _, _, added, removed in map(diff_extract, attr_diffs))
 
 def diff_contains_empty_attr_prop_values(diffs):
     """
@@ -407,4 +515,4 @@ def diff_contains_empty_attr_prop_values(diffs):
     def dict_value_empty(dct):
         return any(not v for v in dct.itervalues())
     return any(dict_value_empty(added) \
-            for _, _, added, removed in attr_prop_diffs)
+            for _, _, added, removed in map(diff_extract, attr_prop_diffs))

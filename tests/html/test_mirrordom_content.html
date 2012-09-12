@@ -1,6 +1,7 @@
 <html>
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>helo</title>
     <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
     <script type="text/javascript">
         var text = ["Pig", "Dog", "Cat", "Aardvark"];
@@ -51,7 +52,12 @@
             input.prop("disabled", true);
         }
 
+        function insert_div() {
+            jQuery("<p>inserted div</p>").insertBefore("#themiddleelement");
+        }
+
     </script>
+    <link rel="StyleSheet" type="text/css" href="test_mirrordom.css"/>
     <style type="text/css">
       table { border-collapse: collapse; }
       table,th,td { border: 1px solid black; }
@@ -62,7 +68,7 @@
 
     <!-- Here lies a comment -->
     <div>
-      Blaurgh
+      Blaurghd
       <table id="thetable" style="border: 1px solid black;">
         <tr>
           <th>1</th>
@@ -86,6 +92,10 @@
     <iframe name="theiframe" id="theiframe"></iframe>
 
     <a href="test_dom_sync_content2.html">Page 2</a>
+
+    <div id="themiddleelement">hello</div>
+    <div>world</div>
+    <div>poodle</div>
 
     <div id="thelastelement">
     </div>

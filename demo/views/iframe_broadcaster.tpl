@@ -16,7 +16,9 @@
             jQuery(function() {
                 var broadcaster = new MirrorDom.Broadcaster({
                     root_url: "{{mirrordom_uri}}/",
-                    iframe:   document.getElementById("mirrordom_iframe")
+                    iframe:   document.getElementById("mirrordom_iframe"),
+                    debug:    true,
+                    poll_interval: 2000
                 });
                 
                 broadcaster.start();

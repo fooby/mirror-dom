@@ -8,9 +8,147 @@ MirrorDom.Viewer = function(options) {
     this.receiving = false;
     this.interval_event = null;
     this.iframe = null;
-    this.next_change_ids = {};
-    this.init(options);
+
+    // Keep a reference to all frames. Possible keys are:
+    //
+    //      m: Main viewer frame
+    //      <comma separated node path>,i: Iframe
+    this.frames = {}
+    
+    // Misc
+    this.debug = false;
+
+    this.next_change_id = null;
+    this.init_options(options);
 }
+
+MirrorDom.Viewer.prototype.init_options = function(options) {
+    if (options.puller) {
+        this.puller = options.puller;
+    } else {
+        this.puller = new MirrorDom.JQueryXHRPuller(options.root_url);
+    }
+
+    this.iframe = options.iframe;
+    this.poll_interval = options.poll_interval != null ? options.poll_interval : 1000;
+    this.debug = options.debug;
+};
+
+// ----------------------------------------------------------------------------
+// Public functions
+// ----------------------------------------------------------------------------
+
+MirrorDom.Viewer.prototype.start = function(container_id) {
+    var self = this;
+    self.poll();
+    this.interval_event = window.setInterval(function() {
+        self.poll();
+    }, this.poll_interval);
+};
+
+// ----------------------------------------------------------------------------
+// Internal logic
+// ----------------------------------------------------------------------------
+MirrorDom.Viewer.prototype.poll = function() {
+    var d = this.get_document_object();
+    if (d.readyState != "complete") {
+        this.log("Page is loading, skip poll");
+        return;
+    }
+    
+    if (this.receiving) {
+        this.log("Already receiving, aborting");
+        return;
+    }
+
+    this.log("Polling");
+
+    this.receiving = true;
+    var self = this;
+    var params = {};
+    if (this.next_change_id != null) {
+        params["change_id"] = this.next_change_id;
+    }
+    this.puller.pull("get_update", params, 
+        function(result) {
+            self.receive_updates(result);
+            self.receiving = false;
+        }
+    );
+}
+
+MirrorDom.Viewer.prototype.receive_updates = function(result) {
+
+    var changelogs = result["changesets"];
+
+    var doc_elem = this.get_document_element();
+
+    // We have a list of changelogs for each iframe in our document.
+    // The changelogs are ordered top to bottom, since the higher up frames
+    // need to create the lower frames first, before those frame documents can
+    // be managed.
+
+
+    // Special handling for iframes, which may need to be specially managed
+    var self = this;
+    var make_apply_iframe_func = function(iframe, cs, frame_path) {
+        return function() {
+            console.log("Going for " + frame_path.join(",") + "!");
+            self.log("Applying changeset to " + frame_path.join(","));
+            var d = MirrorDom.Util.get_document_object_from_iframe(iframe);
+            self.apply_changeset(d.documentElement, cs);
+        }
+    }
+    
+    for (var i = 0; i < changelogs.length; i++) {
+        var frame_path = changelogs[i][0];
+        var changeset = changelogs[i][1];
+
+        // Don't bother with this changeset
+        if (!("diffs" in changeset)) {
+            continue;
+        }
+
+        // Locate the iframe
+        var apply_node = MirrorDom.Util.node_at_upath(doc_elem, frame_path);
+
+        if (frame_path[frame_path.length-1] == 'i') {
+            // Handle iframe
+            var iframe = apply_node;
+
+            apply_func = make_apply_iframe_func(iframe, changeset, frame_path);
+
+            d = MirrorDom.Util.get_document_object_from_iframe(iframe);
+            if (d.readyState != 'complete') {
+                jQuery(iframe).one("load.mirrordom", apply_func);
+            } else {
+                apply_func();
+            }
+        } else if (frame_path[frame_path.length-1] == 'm') {
+            // Main iframe
+            this.apply_changeset(doc_elem, changeset);
+        }
+
+    }
+
+    this.next_change_id = result["last_change_id"] + 1;
+}
+
+MirrorDom.Viewer.prototype.apply_changeset = function(doc_elem, changelog) {
+    if (changelog.init_html) {
+        this.log(changelog.last_change_id + ": Got new html!");
+        this.apply_document(doc_elem, changelog.init_html);
+    }
+
+    if (changelog.diffs) {
+        this.log(changelog.last_change_id + ": Applying diffs");
+        this.apply_diffs(doc_elem, changelog.diffs);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Internal utility functions
+// ----------------------------------------------------------------------------
 
 MirrorDom.Viewer.prototype.get_document_object = function() {
     return MirrorDom.Util.get_document_object_from_iframe(this.iframe);
@@ -20,17 +158,9 @@ MirrorDom.Viewer.prototype.get_document_element = function() {
     return this.get_document_object().documentElement;
 }
 
-MirrorDom.Viewer.prototype.node_at_path = function(root, ipath) {
-    var node = root;
-    for (var i=0; i < ipath.length; i++) {
-        node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
-        for (var j=0; j < ipath[i]; j++) {
-            node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
-        }
-    }
-    return node;
-};
-
+// ----------------------------------------------------------------------------
+// DOM functions
+// ----------------------------------------------------------------------------
 MirrorDom.Viewer.prototype.apply_attrs = function(changed, removed, node, ipath) {
     for (var name in changed) {
         var value = changed[name];
@@ -52,34 +182,6 @@ MirrorDom.Viewer.prototype.apply_props = function(changed, removed, node, ipath)
     for (var name in removed) {
         // Hmm...I don't think this is valid actually, TODO: remove removed
     }
-
-    // special cases
-    //if (k == "selected" && node.tagName == "OPTION") {
-    //    // selected <option>. null would indicate
-    //    // the select attribute as been deleted; any
-    //    // other value means we need to call .selectedIndex
-    //    // on the parent <select> to have the browser actually react
-    //    if (v !== null) {
-    //        if (node.parentNode.tagName == "SELECT") {                
-    //            node.parentNode.selectedIndex = ipath[ipath.length-1];
-    //        }
-    //    }        
-    //} else if (k == "checked" && node.tagName == "INPUT") {
-    //    // checked <input>.
-    //    node.checked = (v !== null);
-    //    return;
-    //} else if (k == "value") {
-    //    node.value = v;
-    //    return;
-    //}
-
-    //if (v === null) {
-    //    //console.log("removeAttribute " + k);
-    //    node.removeAttribute(k);
-    //} else {
-    //    //console.log("setAttribute " + k + ": " + v);        
-    //    node.setAttribute(k, v);
-    //}
 };
 
 MirrorDom.Viewer.prototype.apply_head_html = function(doc_elem, head_html) {
@@ -90,7 +192,6 @@ MirrorDom.Viewer.prototype.apply_head_html = function(doc_elem, head_html) {
         jQuery(this).appendTo(head);
     });
 }
-
 
 /**
  * Takes in a browser native XML element (NOT jquery wrapped)
@@ -142,8 +243,12 @@ MirrorDom.Viewer.prototype.copy_to_node = function(xml_node, dest, use_innerhtml
  * EXPECTS WELL FORMED XML. If you rip innerHTML (which is HTML but
  * not well formed XML) out of a document and chuck it back in here, that won't
  * work.
+ *
+ * @param doc_elem      null for root document element, but this will be called
+ *                      with child iframe document elements too.
  */
-MirrorDom.Viewer.prototype.apply_document = function(data) {
+MirrorDom.Viewer.prototype.apply_document = function(doc_elem, data) {
+    //doc_elem = doc_elem == null ? this.get_document_element() : doc_elem;
 
     //var full_html = ['<html>', html, '</html>'].join("");
     // note that viewer won't execute scripts from the client
@@ -154,14 +259,12 @@ MirrorDom.Viewer.prototype.apply_document = function(data) {
     //jQuery(doc_elem).html(full_html);
     //console.log(full_html);
     
-    var doc_elem = this.get_document_element();
-
     var new_doc = jQuery(jQuery.parseXML(data));
     var new_head_node = new_doc.find("head");
 
     if (new_head_node.length > 0) {
         var current_head = doc_elem.getElementsByTagName('head')[0];
-        current_head = jQuery(current_head);
+        current_head = jQuery(current_head).empty();
         this.copy_to_node(new_head_node, current_head, false);
     }
 
@@ -173,6 +276,8 @@ MirrorDom.Viewer.prototype.apply_document = function(data) {
     }
 
     current_body = jQuery(current_body).empty();
+    current_body[0].style.cssText = "";
+
     var new_body_node = new_doc.find("body");
     this.copy_to_node(new_body_node, current_body, true);
 
@@ -190,18 +295,18 @@ MirrorDom.Viewer.prototype.apply_document = function(data) {
  *
  * @param node      DOM node to start applying from. If null
  *                  then use document element.
+ *
+ * @param index     Index in changeset diffs (for debugging log messages only)                 
  */
-MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs) {
+MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
     if (node == null) { node = this.get_document_element(); }
     var root = node;
 
     for (var i=0; i < diffs.length; i++) {
         var diff = diffs[i];        
-
-
         // Diff structure:
         //
-        // 0) "node", "text", "deleted", "attribs", "css"
+        // 0) "node", "text", "deleted", "attribs", "props"
         // 1) Path to node (node offsets at each level of tree)
         //
         // For "node", "text":
@@ -212,64 +317,49 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs) {
         //    - nodeType:   Node type
         // 4) Extra properties to apply
         //
-        // For "attribs":
+        // For "attribs", "props":
         // 2) Dictionary of changed attributes
-        //
-        // For "css":
-        // 2) New cssText property to set
+        // 3) Dictionary of removed attributes (may be omitted)
         //
         // For "deleted":
         // nope
 
-        
-        //console.log("apply_diff with type: " + diff[0] + " ipath: " + diff[1]);
         if (diff[0] == 'node' || diff[0] == 'text') {
-            var parent = this.node_at_path(root, 
+            var parent = MirrorDom.Util.node_at_path(root, 
                 diff[1].slice(0, diff[1].length-1));
 
             var node = parent.firstChild;
             node = MirrorDom.Util.apply_ignore_nodes(node);
 
-            // go to node referenced in offset and replace it 
+            // Go to node referenced in offset and replace it 
             // if it exists; and delete all following nodes
             for (var d=0; d < diff[1][diff[1].length-1]; d++) {
-                //console.log("Before " + d + ": " + node.nodeName);
                 node = node.nextSibling;
                 node = MirrorDom.Util.apply_ignore_nodes(node);
-
-
-                //console.log("node at sibling offset " + d + ": " + (node != null ? node.nodeName : "whoops"));
             }
 
-            if (node) {
-                //console.log('replacing: ' + node.tagName + ": " + 
-                //        node.innerHTML);
-            } else {
-                //console.log('not replacing, null node');
-            }
+            // Wipe everything out, as we're assuming the diff contains a
+            // reconstruction of ALL our remaining sibling nodes.
+            this.delete_node_and_remaining_siblings(node);
 
-            while (node) {
-                var next_node = node.nextSibling;
-                parent.removeChild(node);
-                node = next_node;
-            }
-
-            // create new element from the cloned node
+            // Create new element from the cloned node
             if (diff[0] == 'node') {
                 var cloned_node = diff[3];
-                var new_elem = document.createElement(
-                        cloned_node.nodeName);
-
+                var new_elem = document.createElement(cloned_node.nodeName);
                 for (var k in cloned_node.attributes) {
                     new_elem.setAttribute(k, cloned_node.attributes[k]);
                 }
-
-                //new_elem.innerHTML = diff[2];
-                // Derek HACK
                 jQuery(new_elem).html(diff[2]);
 
-                // apply diffs of properties like .value, selectedIndex
-                // etc which wouldn't be in innerHTML
+                // Apply all properties which doesn't get transmitted in
+                // innerHTML. Properties are in the form [path, property_dictionary]
+                // where path is relative to the newly added node.
+                var props = diff[4];
+                for (var j=0; j < props.length; j++) {
+                    var ppath = props[j][0];
+                    var pnode = MirrorDom.Util.node_at_path(new_elem, ppath);
+                    this.apply_props(props[j][1], null, pnode, ppath);
+                }
                 this.apply_diffs(new_elem, diff[4]);
             } else {
                 var new_elem = document.createTextNode(diff[2]);
@@ -279,91 +369,59 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs) {
         } else if (diff[0] == 'attribs') {
             // diff[2] = changed attributes
             // diff[3] = removed attributes
-            var node = this.node_at_path(root, diff[1]);
+            var node = MirrorDom.Util.node_at_path(root, diff[1]);
             this.apply_attrs(diff[2], diff[3], node, diff[1]);
         } else if (diff[0] == 'props') {
             // diff[2] = changed properties
-            // diff[3] = removed properties
-            var node = this.node_at_path(root, diff[1]);
-            this.apply_props(diff[2], diff[3], node, diff[1]);
+            // diff[3] = removed properties (may not exist)
+            var removed = (diff.length == 4) ? diff[3] : null;
+            var node = MirrorDom.Util.node_at_path(root, diff[1]);
+            this.apply_props(diff[2], removed, node, diff[1]);
         } else if (diff[0] == 'deleted') {
-            var node = this.node_at_path(root, diff[1]);
-            // remove remaining siblings and node itself
-            while (node) {
-                //console.log('deleted: ' + node.tagName + ": " + node.innerHTML + 
-                //        " parent: " + node.parentNode.innerHTML);
-
-                var next_node = node.nextSibling;
-                node.parentNode.removeChild(node);
-                node = next_node;
-            }
+            var node = MirrorDom.Util.node_at_path(root, diff[1]);
+            this.delete_node_and_remaining_siblings(node);
         } 
     }
 }
 
-MirrorDom.Viewer.prototype.poll = function() {
-    if (this.receiving) {
-        console.log("Already receiving, aborting");
+// ----------------------------------------------------------------------------
+// Utility functions
+// ----------------------------------------------------------------------------
+
+/**
+ * Deletes a node and all its siblings to the right
+ */
+MirrorDom.Viewer.prototype.delete_node_and_remaining_siblings = function(node) {
+    if (node == null) {
         return;
     }
 
-    console.log("POOL!");
-
-    this.receiving = true;
-    var self = this;
-    this.puller.pull("get_update", {
-            "change_ids": this.next_change_ids
-        }, 
-        function(result) {
-            self.receive_updates(result);
-            self.receiving = false;
-        }
-    );
-}
-
-MirrorDom.Viewer.prototype.receive_updates = function(result) {
-    for (var window_id in result) {
-        var doc_elem = this.get_document_element();
-        var change_log = result[window_id];
-
-        if (change_log.init_html) {
-            console.log(change_log.last_change_id + ": Got new html!");
-            this.apply_document(change_log.init_html);
-        }
-
-        if (change_log.diffs) {
-            console.log(change_log.last_change_id + ": Applying diffs");
-            this.apply_diffs(doc_elem, change_log.diffs);
-        }
-
-        this.next_change_ids[window_id] =
-            change_log.last_change_id + 1;
+    var parent = node.parentNode;
+    while (node) {
+        var next_node = node.nextSibling;
+        parent.removeChild(node);
+        node = next_node;
     }
 }
 
-MirrorDom.Viewer.prototype.start = function(container_id) {
-    var self = this;
-    this.interval_event = window.setInterval(function() {
-        self.poll();
-    }, this.poll_interval);
-};
-
-MirrorDom.Viewer.prototype.init = function(options) {
-    if (options.puller) {
-        this.puller = options.puller;
-    } else {
-        this.puller = new MirrorDom.Viewer.JQueryXHRPuller(options.root_url);
+// ----------------------------------------------------------------------------
+// Debug functions
+// ----------------------------------------------------------------------------
+MirrorDom.Viewer.prototype.log = function(msg) {
+    if (this.debug && window.console && console.log) {
+        console.log(msg);
     }
+}
 
-    this.iframe = options.iframe;
-    this.poll_interval = options.poll_interval != null ? options.poll_interval : 1000;
-};
 
-MirrorDom.Viewer.JQueryXHRPuller = function(root_url) {
+// ----------------------------------------------------------------------------
+// Helper classes
+// ----------------------------------------------------------------------------
+MirrorDom.JQueryXHRPuller = function(root_url) {
     this.root_url = root_url;
 };
 
-MirrorDom.Viewer.JQueryXHRPuller.prototype.pull = function(method, args, callback) {
+MirrorDom.JQueryXHRPuller.prototype.pull = function(method, args, callback) {
     if (method == "get_update") {
         args.change_ids = JSON.stringify(args.change_ids);
     }

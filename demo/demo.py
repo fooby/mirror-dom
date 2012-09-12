@@ -14,6 +14,7 @@ import wsgiref
 import logging
 import json
 
+import pprint
 from external_libs import bottle
 
 app = bottle.Bottle()
@@ -36,7 +37,7 @@ import mirrordom.server
 
 # Global storage for mirrordom diffs - this means we only have one global
 # mirrordom session for the demo.
-mirrordom_storage = {}
+mirrordom_storage = mirrordom.server.create_storage()
 
 logger = logging.getLogger("mirrordom")
 logger.setLevel(logging.DEBUG)
@@ -47,25 +48,18 @@ logger.addHandler(h)
 def get_mirrordom_uri(environ=None):
     if environ is None:
         environ = bottle.request.environ
-    return wsgiref.util.application_uri(environ) + 'mirrordom'
-
+    uri = wsgiref.util.application_uri(environ) + 'mirrordom'
+    return uri
 
 @app.route('/viewer')
 def viewer():
     """ Serve the viewer page """
     return bottle.template('simple_viewer', mirrordom_uri=get_mirrordom_uri())
 
-#@app.route('/broadcaster')
-#def broadcaster():
-#    """ Serve the broadcaster page (make sure not to run multiple instances of
-#    this page) """
-#    return bottle.template('simple_broadcaster', mirrordom_uri=get_mirrordom_uri())
-#
 @app.route('/broadcaster')
 def broadcaster():
     """ Serve the broadcaster page (make sure not to run multiple instances of
     this page) """
-    print "HI"
     return bottle.template('iframe_broadcaster', mirrordom_uri=get_mirrordom_uri())
 
 @app.route('/mirrordom/<name>', method='ANY')
@@ -75,33 +69,53 @@ def handle_mirrordom(name):
     """
     global mirrordom_storage
     query = bottle.request.params
-    bottle.response.set_header("Content-Type", "application/json")
+    parsed_query = dict((k, json.loads(v)) for k,v in query.iteritems())
+    result = getattr(mirrordom.server, "handle_" + name)(mirrordom_storage, **parsed_query)
+    return result
 
-    #TODO: Tidy up this mess
-    if name == "add_diff":
-        # have to de-jsonise diff argument
-        result = mirrordom.server.handle_add_diff(mirrordom_storage,
-                window_id=query["window_id"],
-                diff=json.loads(query["diff"]))
-    elif name == "get_update":
-        result = mirrordom.server.handle_get_update(mirrordom_storage,
-                change_ids=json.loads(query["change_ids"]))
-    elif name == "new_window":
-        prop_diffs = json.loads(query["props"])
-        result = mirrordom.server.handle_new_window(mirrordom_storage,
-                query["html"], prop_diffs, query["url"])
-    elif name == "reset":
-        prop_diffs = json.loads(query["props"])
-        result = mirrordom.server.handle_reset(mirrordom_storage,
-                query["window_id"], query["html"], prop_diffs, query["url"])
+@app.route('/debug_storage')
+def debug_storage():
+    """ Static mirrordom js files """
+    global mirrordom_storage
+    from xml.sax.saxutils import escape
+    storage_str = pprint.pformat(mirrordom_storage)
+    storage_str = escape(storage_str)
+    return "<html><body><pre>%s</pre></body></html>"  % (storage_str)
 
-    else:
-        result = getattr(mirrordom.server, "handle_" + name)(mirrordom_storage, **query)
-    print result
-    return json.dumps(result)
+#@app.route('/mirrordom/<name>', method='ANY')
+#def handle_mirrordom(name):
+#    """
+#    Core mirrordom server functionality
+#    """
+#    global mirrordom_storage
+#    query = bottle.request.params
+#    bottle.response.set_header("Content-Type", "application/json")
+#
+#    #TODO: Tidy up this mess
+#    if name == "add_diff":
+#        # have to de-jsonise diff argument
+#        result = mirrordom.server.handle_add_diff(mirrordom_storage,
+#                window_id=query["window_id"],
+#                diff=json.loads(query["diff"]))
+#    elif name == "get_update":
+#        result = mirrordom.server.handle_get_update(mirrordom_storage,
+#                change_ids=json.loads(query["change_ids"]))
+#    elif name == "new_window":
+#        prop_diffs = json.loads(query["props"])
+#        result = mirrordom.server.handle_new_window(mirrordom_storage,
+#                query["html"], prop_diffs, query["url"])
+#    elif name == "reset":
+#        prop_diffs = json.loads(query["props"])
+#        result = mirrordom.server.handle_reset(mirrordom_storage,
+#                query["window_id"], query["html"], prop_diffs, query["url"])
+#
+#    else:
+#        result = getattr(mirrordom.server, "handle_" + name)(mirrordom_storage, **query)
+#    print result
+#    return json.dumps(result)
 
 @app.route('/static/mirrordom/<filepath:path>')
-def mirrordom_static(filepath):
+def js_static(filepath):
     """ Static mirrordom js files """
     return bottle.static_file(filepath, root=MIRRORDOM_JS_PATH)
 

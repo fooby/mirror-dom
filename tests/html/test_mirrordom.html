@@ -32,13 +32,13 @@
       // ------------------------------------------
 
       function test_1_get_broadcaster_document() {
-          var data = broadcaster.get_document_data();
-          return JSON.stringify(data);
+          var data = broadcaster.start_full_document();
+          return JSON.stringify(data["html"]);
       }
 
       function test_1_apply_viewer_document(result) {
           var d = JSON.parse(result);
-          viewer.apply_document(d); 
+          viewer.apply_document(null, d); 
       }
 
       // Test 2: Test retrieve, sanitise and apply diff
@@ -71,11 +71,15 @@
       //}
 
       function test_3_get_broadcaster_all_property_diffs() {
-          //debugger;
-          var diffs = broadcaster.get_all_property_diffs();
-          return JSON.stringify(diffs);
+          var data = broadcaster.start_full_document();
+          return JSON.stringify(data["props"]);
       }
 
+      // Test 4: Test apply diff of inserted element (i.e. not at end of body)
+      // ------------------------------------------
+      function test_4_modify_broadcaster_document_insert_element() {
+          broadcaster_iframe.contentWindow.insert_div();
+      }
       // *************** END TESTS *****************
 
 

@@ -95,7 +95,6 @@ class TestJavascriptFF(util.TestBrowserBase):
         """ Test 3: Diff of adding a node """
         self.init_webdriver()
         # This triggers clone_dom() in the broadcaster js object, so that diffing works
-        self.webdriver.execute_script("test_1_get_broadcaster_document()")
         self.webdriver.execute_script("test_3_modify_broadcaster_document_with_add_node()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
         result = json.loads(result)
@@ -111,10 +110,12 @@ class TestJavascriptFF(util.TestBrowserBase):
         assert len(result) == 1
         props = result[0][4]
 
-        # test_3_modify_broadcaster_document_with_add_node adds background-color style
-        # which should reflect in props
+        # test_3_modify_broadcaster_document_with_add_node adds
+        # background-color style which should reflect in the node properties
         assert len(props) == 1
-        prop, prop_path, changed_props, removed_props = props[0]
+
+        # Prop should be: [], {u'style.cssText': u'background-color: red;'}
+        prop_path, changed_props = props[0]
         assert "style.cssText" in changed_props
         # The path should be empty as the style applies directly to the node
         assert prop_path == []
@@ -153,19 +154,17 @@ class TestJavascriptFF(util.TestBrowserBase):
     def test_get_diff_styles(self):
         """ Test 6: Retrieve document with dynamically modified styles """
         self.init_webdriver()
-        # This triggers clone_dom() in the broadcaster js object, so that diffing works
-        self.webdriver.execute_script("test_1_get_broadcaster_document()")
         self.webdriver.execute_script("test_6_modify_broadcaster_document_with_css()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
         result = json.loads(result)
         print result
-        assert len(result) == 2
+
+        # Extra class added, plus css background-color
+        assert len(result) >= 2
 
     def test_get_diff_attributes(self):
         """ Test 7: Diff of attributes """
         self.init_webdriver()
-        # This triggers clone_dom() in the broadcaster js object, so that diffing works
-        self.webdriver.execute_script("test_1_get_broadcaster_document()")
         self.webdriver.execute_script("test_7_modify_broadcaster_document_with_attribute()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
         result = json.loads(result)
@@ -175,8 +174,7 @@ class TestJavascriptFF(util.TestBrowserBase):
     def test_get_diff_properties(self):
         """ Test 8: Diff of properties """
         self.init_webdriver()
-        # This triggers clone_dom() in the broadcaster js object, so that diffing works
-        self.webdriver.execute_script("test_1_get_broadcaster_document()")
+        self.webdriver.execute_script("test_3_force_dom_clone()")
 
         new_value = "-ae9ij"
 
@@ -198,8 +196,6 @@ class TestJavascriptFF(util.TestBrowserBase):
     def test_get_diff_delete_node(self):
         """ Test 9: Diff of deleting nodes """
         self.init_webdriver()
-        # This triggers clone_dom() in the broadcaster js object, so that diffing works
-        self.webdriver.execute_script("test_1_get_broadcaster_document()")
         self.webdriver.execute_script("test_9_modify_broadcaster_document_with_delete_node()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
         result = json.loads(result)
@@ -302,6 +298,8 @@ class TestJavascriptFF(util.TestBrowserBase):
 
         This is mainly testing that the ipaths in the get_property_diffs value
         are correct.
+
+        WARNING: Assumes that diffs are untouched in mirrordom
         """
         new_value = "sdfgsdfogj"
 
@@ -321,7 +319,7 @@ class TestJavascriptFF(util.TestBrowserBase):
         self.webdriver.switch_to_default_content()
         diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
         diff = json.loads(diff)
-        print "Diff: %s"
+        print "Diff: %s" % (diff)
         self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
         # Now let's check it out

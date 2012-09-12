@@ -32,20 +32,25 @@
       // ------------------------------------------
 
       function test_1_get_broadcaster_document() {
-          var data = broadcaster.get_document_data();
-          return data;
+          var data = broadcaster.start_full_document();
+          return data["html"];
       }
 
       // Test 2: Test apply html
       // ------------------------------------------
       function test_2_apply_document(result) {
-          viewer.apply_document(result); 
+          viewer.apply_document(null, result); 
       }
 
       // Test 3: Test get diff
       // ------------------------------------------
       function test_3_modify_broadcaster_document_with_add_node() {
+          test_3_force_dom_clone();
           broadcaster_iframe.contentWindow.add_div();
+      }
+
+      function test_3_force_dom_clone() {
+          broadcaster.make_dom_clone();
       }
 
       function test_3_get_broadcaster_diff() {
@@ -68,19 +73,21 @@
 
       // Test 5: Test get initial property dump
       function test_5_get_broadcaster_all_property_diff() {
-          var diffs = broadcaster.get_property_diffs();
-          return JSON.stringify(diffs);
+          var data = broadcaster.start_full_document();
+          return JSON.stringify(data["props"]);
       }
 
       // Test 6: Test get diff with dynamic class/style change
       // ------------------------------------------
       function test_6_modify_broadcaster_document_with_css() {
+          test_3_force_dom_clone();
           broadcaster_iframe.contentWindow.change_some_css();
       }
 
       // Test 7: Test get diff with attribute change
       // ------------------------------------------
       function test_7_modify_broadcaster_document_with_attribute() {
+          test_3_force_dom_clone();
           broadcaster_iframe.contentWindow.change_some_attribute();
       }
 
@@ -93,6 +100,7 @@
       // Test 9: Test get diff with deleting nodes
       // ------------------------------------------
       function test_9_modify_broadcaster_document_with_delete_node() {
+          test_3_force_dom_clone();
           broadcaster_iframe.contentWindow.delete_div();
       }
 
@@ -142,7 +150,7 @@
         <a href="test_javascript_content2.html">Page 2</a> \
       </body> \
     </html>';
-          viewer.apply_document(html);
+          viewer.apply_document(null, html);
       }
 
       function manual_get_property_diffs() {
@@ -152,7 +160,6 @@
       } 
 
       function manual_diff() {
-          test_1_get_broadcaster_document();
           test_3_modify_broadcaster_document_with_add_node();
           debugger;
           var diff = test_3_get_broadcaster_diff();
@@ -177,6 +184,17 @@
           console.log("Diff: " + JSON.stringify(diff));
       }
 
+      function manual_get_diff_delete() {
+          test_9_modify_broadcaster_document_with_delete_node();
+          var diff = test_3_get_broadcaster_diff();
+          console.log("Diff: " + JSON.stringify(diff));
+      }
+
+      function manual_apply_diff_delete() {
+          test_4_setup_viewer_document();
+          var DIFFS = "[[\"deleted\",[1,4]]]";
+          test_4_apply_viewer_diff(DIFFS);
+      }
     </script>
   </head>
   <body>
@@ -187,6 +205,8 @@
     <a href="javascript:manual_get_property_diffs()">Manual get ALL property diffs!</a><br/>
     <a href="javascript:manual_diff()">Manual diff!</a><br/>
     <a href="javascript:manual_apply_diff()">Manual apply diff!</a><br/>
-    <a href="javascript:manual_apply_diff_css()">Manual get diff with css!</a>
+    <a href="javascript:manual_apply_diff_css()">Manual get diff with css!</a><br/>
+    <a href="javascript:manual_get_diff_delete()">Manual get diff with delete!</a><br/>
+    <a href="javascript:manual_apply_diff_delete()">Manual apply diff with delete!</a>
   </body>
 </html>

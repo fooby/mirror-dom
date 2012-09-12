@@ -50,7 +50,7 @@ class TestMirrorDom(util.TestBase):
       <input id="text_input" type="text" size="50" value="hello"></input>
     </div>
     <a href="test_dom_sync_content2.html">Page 2</a>
-    <iframe name="theiframe" id="theiframe"> </iframe>
+    <iframe name="theiframe" id="theiframe" src="blah.html"> </iframe>
     <script type="text/javascript">alert("helo");</script>
   </body>
 </html>
@@ -102,6 +102,9 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
     def compare_frames(self):
         broadcaster_html = self.webdriver.execute_script("return get_broadcaster_html()")
         viewer_html = self.webdriver.execute_script("return get_viewer_html()")
+
+        #print "Broadcaster: %s" % (broadcaster_html)
+        #print "Viewer: %s" % (viewer_html)
         return self.compare_html(broadcaster_html, viewer_html, clean=True)
 
     def test_init_html(self):
@@ -166,7 +169,7 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         diff = self.webdriver.execute_script("return test_3_get_broadcaster_all_property_diffs()")
         result = json.loads(diff)
 
-        print result
+        #print result
 
         # Only properties
         assert all(d[0] == "props" for d in result)
@@ -176,7 +179,7 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         # border rules for each side, FF retains the single border rule)
         assert util.diff_contains_changed_property_value(result, "purple")
 
-        print result
+        #print result
 
         # TODO: Sanitise diff in mirrordom.server?
         result = json.dumps(result)
@@ -193,6 +196,51 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         table = self.webdriver.find_element_by_id('thetable')
         table_background_colour = input.value_of_css_property("background-color")
         assert table_background_colour in ("purple", "rgba(255, 255, 255, 1)")
+
+    def test_link_stylesheet_transfer(self):
+        """
+        Test 4: Stylesheets in head element
+        """
+        self.init_webdriver()
+
+        # Replicate the initial test
+        self.test_init_html()
+
+        # Check for stylesheet
+        self.webdriver.switch_to_frame('viewer_iframe')
+
+        # Look for test_mirrordom.css
+        links = self.webdriver.find_elements_by_xpath('/html/head/link')
+        for l in links:
+            # When retrieving in IE, href is prefixed with hostname
+            if l.get_attribute("href").endswith("test_mirrordom.css"):
+                print "Href: %s" % (l.get_attribute("href"))
+                link_node = l
+                break
+
+        assert link_node is not None
+        assert link_node.get_attribute("rel").lower() == "stylesheet"
+        assert link_node.get_attribute("type").lower() == "text/css"
+
+    def test_diff_transfer_inserted_element(self):
+        """
+        Test 5: Basic diff transfer, with an element inserted in the middle of
+        the DOM.
+        """
+        self.init_webdriver()
+
+        # Replicate the initial test
+        self.test_init_html()
+
+        # Now let's go further and modify the document
+        self.webdriver.execute_script("test_4_modify_broadcaster_document_insert_element()")
+        diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
+        diff = json.loads(diff)
+        print diff
+        # TODO: Sanitise diff in mirrordom.server?
+        result = json.dumps(diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", result)
+        assert self.compare_frames()
 
 class TestMirrorDom_with_IE(TestMirrorDom_with_FF):
     @classmethod

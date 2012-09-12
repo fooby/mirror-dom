@@ -8,6 +8,28 @@ var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
 MirrorDom.Util = {}
 
+
+/**
+ * Split property path by "." (purely for style.cssText's benefit)
+ *
+ * Returns a list of [(original path, [list of path elements])]
+ *
+ * e.g. The if prop_paths is ["style.cssText"], the return value is
+ *      [["style.cssText", ["style", "cssText"]]]
+ */
+MirrorDom.Util.process_property_paths = function(prop_paths) {
+    var prop_names = [];
+    for (var i = 0; i < prop_paths.length; i++) {
+        var prop_text = prop_paths[i];
+        prop_names.push([prop_text, prop_text.split('.')]);
+    }
+    return prop_names;
+}
+
+MirrorDom.Util.PROPERTY_NAMES = ["disabled", "value", "checked", "style.cssText", "className"];
+MirrorDom.Util.IGNORE_ATTRIBS = {"style": null};
+MirrorDom.Util.PROPERTY_LOOKUP = MirrorDom.Util.process_property_paths(MirrorDom.Util.PROPERTY_NAMES);
+
 /**
  * @param iframe        Iframe object
  */
@@ -66,7 +88,7 @@ MirrorDom.Util.should_ignore_node = function(node) {
 }
 
 /**
- * Given a DOM node, determine if we should ignore it
+ * Given a DOM node, find the first sibling that we DON'T ignore.
  */
 MirrorDom.Util.apply_ignore_nodes = function(node) {
     while (node != null && MirrorDom.Util.should_ignore_node(node)) {
@@ -75,16 +97,6 @@ MirrorDom.Util.apply_ignore_nodes = function(node) {
 
     return node;
 }
-
-//MirrorDom.Util.only_elements_and_apply_ignore_nodes = function(node) {
-//    while (node != null &&
-//           node.nodeType != 1 &&
-//           MirrorDom.Util.should_ignore_node(node)) {
-//        node = node.nextSibling;
-//    }
-//
-//    return node;
-//}
 
 /**
  * Set property on a DOM node.
@@ -141,33 +153,144 @@ MirrorDom.Util.get_property = function(node, prop_lookup) {
  */
 MirrorDom.Util.get_all_properties = function(node, prop_lookup_lost) {
 }
-
 /**
- * Split property path by "." (purely for style.cssText's benefit)
- *
- * Returns a list of [(original path, [list of path elements])]
- *
- * e.g. The if prop_paths is ["style.cssText"], the return value is
- *      [["style.cssText", ["style", "cssText"]]]
+ * ============================================================================
+ * Path Utilities
+ * ============================================================================
  */
-MirrorDom.Util.process_property_paths = function(prop_paths) {
-    var prop_names = [];
-    for (var i = 0; i < prop_paths.length; i++) {
-        var prop_text = prop_paths[i];
-        prop_names.push([prop_text, prop_text.split('.')]);
+
+MirrorDom.Util.get_properties = function(node) {
+    if (node.nodeType == 1) {
+        // Let's go check the node
+        var new_props = {}
+        var diff = false;
+        for (var i = 0; i < this.PROPERTY_LOOKUP.length; i++) {
+            var prop_text = this.PROPERTY_LOOKUP[i][0];
+            var prop_lookup = this.PROPERTY_LOOKUP[i][1];
+            var prop_result = MirrorDom.Util.get_property(node, prop_lookup);
+            var prop_found = prop_result[0];
+            var prop_value = prop_result[1];
+            if (prop_found && (prop_value != "" && prop_value != null)) {
+                new_props[prop_text] = prop_value;
+                diff = true;
+            }
+        }
+        if (diff) {
+            return new_props;
+        }
     }
-    return prop_names;
+    return null;
 }
 
+
+MirrorDom.Util.ipath_equal = function(x, y) {
+    if (x.length != y.length) { return false; }
+    for (var i = 0; i < x.length; i++) {
+        if (x[i] != y[i]) { return false; }
+    }
+    return true;
+}
+
+/**
+ * Returns true if x is equal to or a child of test
+ *
+ * e.g. [1,2,4,5,6], [1,2,4] = true
+ */
+MirrorDom.Util.is_inside_ipath = function(x, test) {
+    if (x.length < test.length) { return false; }
+    for (var i = 0; i < test.length; i++) {
+        if (test[i] != x[i]) { 
+            return false;
+        }
+    }
+    return true;
+}
+
+MirrorDom.Util.node_at_path = function(root, ipath) {
+    var node = root;
+    for (var i=0; i < ipath.length; i++) {
+        node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
+        for (var j=0; j < ipath[i]; j++) {
+            node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+        }
+    }
+    return node;
+};
+
+/**
+ * Node at upath...these are very similar to ipaths except
+ * they contain directives to continue descending in iframes.
+ *
+ * The "u" stands for universal. I'm not sure what the "i" stands for, i'll
+ * think of something soon.
+ *
+ * e.g. [1,4,3,'i',1,1,2]  means
+ * - iframe at position 1,4,3
+ * - inside that iframe, the node at 1,1,2
+ *
+ * @param doc       Document object (preferably not an actual DOM element in
+ *                  the document)
+ *
+ * @returns         DOM node (if last item in path is 'i', then iframe element)
+ */
+MirrorDom.Util.node_at_upath = function(doc, upath) {
+    var node = doc;
+    var in_iframe = false;
+
+    for (var i=0; i < upath.length; i++) {
+        switch (upath[i]) {
+            case 'm':
+                // Special case: Should be the root of the main frame document
+                // Ignore this and keep proceeding.
+                break;
+            case 'i':
+                // Descend into iframe - root at this point should be an
+                // iframe, otherwise we got a problem
+                //var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                //node = d;
+                if (node.nodeName.toLowerCase() != 'iframe') {
+                    throw new Error("Should be in iframe but not, instead got: " + node.nodeName);
+                }
+                in_iframe = true;
+                break;
+            default:
+                // Descend from document object
+                if (in_iframe) {
+                    var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                    node = d.documentElement;
+                }
+
+                // should be a number
+                node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
+                for (var j=0; j < upath[i]; j++) {
+                    node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+                }
+                break;
+        }
+    }
+
+    return node;
+};
+
+
+
+/**
+ * Print a string representation of a node
+ */
 MirrorDom.Util.describe_node = function(node) {
     var desc = [];
     desc.push("<", node.nodeName);
     if (node.id) { desc.push(" #", node.id); }
+    if (node.className) { desc.push(' class="', node.className, '"'); }
     desc.push(">");
     return desc.join("")
 }
 
-MirrorDom.Util.describe_node_at_path = function(root, ipath) {
+
+/**
+ * Debug utility, returns a string describing the node path
+ */
+MirrorDom.Util.describe_node_at_ipath = function(root, ipath) {
     var node = root;
     var path_desc = [];
     var terminate = false;
@@ -200,3 +323,76 @@ MirrorDom.Util.describe_node_at_path = function(root, ipath) {
     }
     return path_desc.join("\n");
 }
+
+/**
+ * Debug utility, returns a string describing the upath
+ */
+MirrorDom.Util.describe_node_at_upath = function(root, upath) {
+    var node = root;
+    var terminate = false;
+    var path_desc = [];
+    var parts_desc = [];
+    for (var i=0; i < upath.length; i++) {
+        switch (upath[i]) {
+            case 'm':
+                // Special case: Should be the root of the main frame document
+                // Ignore this and keep proceeding.
+                path_desc.push("m: Ignoring");
+                break;
+            case 'i':
+                // Descend into iframe - root at this point should be an
+                // iframe, otherwise we got a problem
+                var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                node = d.documentElement;
+                path_desc.push("i: Descending into iframe");
+                break;
+            default:
+                // should be a number
+                parts_desc = [];
+                node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
+                for (var j=0; j <= upath[i]; j++) {
+                    if (j != 0) {
+                        node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+                    }
+                    if (node == null) {
+                        item_desc = [j, ": ", "null :("];
+                        parts_desc.push(item_desc.join(""));
+                        terminate = true;
+                        break;
+                    } else {
+                        item_desc = [j, ": ", MirrorDom.Util.describe_node(node)];
+                        parts_desc.push(item_desc.join(""));
+                    }
+                }
+                path_desc.push(parts_desc.join(" -> "));
+                break;
+        }
+        if (terminate) {
+            break;
+        }
+    }
+    return path_desc.join("\n");
+}
+
+
+/* JQuery-XHR implementation of server push - we just POST all the data to
+ * root_url + the method name */
+ 
+MirrorDom.JQueryXHRPusher = function(root_url) {
+    this.root_url = root_url;
+};
+
+/**
+ * @param args      Either a mapping or a string
+ */
+MirrorDom.JQueryXHRPusher.prototype.push = function(method, args, callback) {
+    for (var k in args) {
+        if (jQuery.isPlainObject(args[k]) || jQuery.isArray(args[k])) {
+            args[k] = JSON.stringify(args[k]);
+        }
+    }
+
+    jQuery.post(this.root_url + method, args, function(result) {
+        if (callback) callback(JSON.parse(result));
+    });
+};
