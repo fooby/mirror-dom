@@ -58,14 +58,14 @@ def blank():
 @app.route('/viewer')
 def viewer():
     """ Serve the viewer page """
-    return bottle.template('simple_viewer', mirrordom_uri=get_mirrordom_uri(),
+    return bottle.template('viewer', mirrordom_uri=get_mirrordom_uri(),
             blank_page=get_mirrordom_uri("blank"))
 
 @app.route('/broadcaster')
 def broadcaster():
     """ Serve the broadcaster page (make sure not to run multiple instances of
     this page) """
-    return bottle.template('iframe_broadcaster', mirrordom_uri=get_mirrordom_uri())
+    return bottle.template('broadcaster', mirrordom_uri=get_mirrordom_uri())
 
 @app.route('/mirrordom/<name>', method='ANY')
 def handle_mirrordom(name):
