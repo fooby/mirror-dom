@@ -2,7 +2,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>helo</title>
-    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
     <script type="text/javascript">
         var text = ["Pig", "Dog", "Cat", "Aardvark"];
         var colour = ["blue", "green", "red"];
@@ -18,27 +18,6 @@
             div.css('background-color', pick_random_item(colour));
         }
 
-        function add_table_row() {
-            var table = jQuery("table");
-            var s = pick_random_item(text);
-            var c = pick_random_item(colour);
-            var n = Math.floor(Math.random() * 100000);
-            table.append('<tr><td style="color: ' + c + '">' + s + '</td><td>' +
-                n + '</td></tr>');
-        }
-
-        function remove_table_row() {
-            var table = jQuery("table");
-            var rows = table.find("tr");
-            var row = jQuery(pick_random_item(rows));
-            row.remove();
-        }
-
-        function change_thetextinput() {
-            var text = jQuery("#thetextinput");
-            text.val("bye");
-        }
-
         function change_some_css() {
             var table = jQuery("#thetable");
             table.css("background-color", "purple");
@@ -47,13 +26,22 @@
             h1s.css("font-style", "italic");
         }
 
-        function change_some_property() {
-            var input = jQuery("#thetextinput");
-            input.prop("disabled", true);
-        }
-
         function insert_div() {
             jQuery("<p>inserted div</p>").insertBefore("#themiddleelement");
+        }
+
+        function insert_table() {
+            jQuery(
+            '<table style="border-collapse: collapse;">' +
+              '<tr>' +
+                '<th class="heloworld">Blah</th>' + 
+                '<th class="heloworld2">Blah2</th>' +
+              '<tr/>' +
+              '<tr>' +
+                '<td style="background-color: blue;">SDF</td>' +
+                '<td style="color: green;">axg</td>' +
+              '</tr>' +
+            '</table>').insertBefore("#themiddleelement");
         }
 
     </script>

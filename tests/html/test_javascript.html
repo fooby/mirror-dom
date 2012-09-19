@@ -1,7 +1,7 @@
 <html>
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
     <script type="text/javascript" src="../../js/common.js"></script>
     <script type="text/javascript" src="../../js/broadcaster.js"></script>
     <script type="text/javascript" src="../../js/viewer.js"></script>
@@ -22,7 +22,8 @@
           });
 
           viewer = new MirrorDom.Viewer({
-              iframe: viewer_iframe
+              iframe: viewer_iframe,
+              blank_page: "blank.html"
           });
       });
 
@@ -39,7 +40,8 @@
       // Test 2: Test apply html
       // ------------------------------------------
       function test_2_apply_document(result) {
-          viewer.apply_document(null, result); 
+          var doc_elem = viewer.get_document_element();
+          viewer.apply_document(doc_elem, result); 
       }
 
       // Test 3: Test get diff
@@ -55,9 +57,7 @@
 
       function test_3_get_broadcaster_diff() {
           var diff = broadcaster.get_diff();
-
-          // Returns JSONified diff
-          return JSON.stringify(diff);
+          return diff;
       }
 
       // Test 4: Test apply diff
@@ -66,15 +66,14 @@
           viewer_iframe.src = "test_javascript_content_sanitised.html";
       }
 
-      function test_4_apply_viewer_diff(diff) {
-          var d = JSON.parse(diff);
-          viewer.apply_diffs(null, d);
+      function test_4_apply_viewer_diff(diffs) {
+          viewer.apply_diffs(null, diffs);
       }
 
       // Test 5: Test get initial property dump
       function test_5_get_broadcaster_all_property_diff() {
           var data = broadcaster.start_full_document();
-          return JSON.stringify(data["props"]);
+          return data["props"];
       }
 
       // Test 6: Test get diff with dynamic class/style change
@@ -104,6 +103,31 @@
           broadcaster_iframe.contentWindow.delete_div();
       }
 
+
+      // Test 14 + 15: Jquery UI dialog
+      // ------------------------------------------
+      function test_14_broadcaster_open_jquery_dialog() {
+          test_3_force_dom_clone();
+          broadcaster_iframe.contentWindow.make_and_show_dialog();
+      }
+
+      function test_15_broadcaster_open_jquery_dialog() {
+          test_3_force_dom_clone();
+          broadcaster_iframe.contentWindow.close_dialog();
+      }
+
+      // Test 16: Text nodes
+      // ------------------------------------------
+      function test_16_broadcaster_add_text_nodes(text_items) {
+          broadcaster_iframe.contentWindow.add_text_nodes(text_items);
+      }
+
+      function test_16_broadcaster_get_text_at_path(path) {
+          var doc_elem = broadcaster.get_document_element();
+          var node = MirrorDom.Util.node_at_path(doc_elem, path);
+          return MirrorDom.Util.get_text_node_content(node);
+      }
+
       // *************** END TESTS *****************
 
       // The following functions are used for doing the testing verification
@@ -120,7 +144,7 @@
  '   <html> \
       <head> \
         <meta content="text/html; charset=utf-8" http-equiv="Content-Type"></meta> \
-        <sc' + 'ript src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js" type="text/javascript"></scr' + 'ipt> \
+        <sc' + 'ript src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js" type="text/javascript"></scr' + 'ipt> \
         <sc' + 'ript type="text/javascript"></scr' + 'ipt> \
         <style type="text/css">table { border-collapse: collapse; } \
         table,th,td { border: 1px solid black; }</style> \
@@ -167,7 +191,7 @@
       }
 
       function manual_apply_diff() {
-          var DIFF = '[["node", [1, 4], "Hello There", {"attributes": {"style": "background-color: red;"}, "nodeType": 1, "nodeName": "DIV", "nodeValue": null}, []]]'
+          var DIFF = [["node", [1, 4], "Hello There", {"attributes": {"style": "background-color: red;"}, "nodeType": 1, "nodeName": "DIV", "nodeValue": null}, []]];
           test_4_setup_viewer_document();
 
           window.setTimeout(function() {
@@ -192,8 +216,14 @@
 
       function manual_apply_diff_delete() {
           test_4_setup_viewer_document();
-          var DIFFS = "[[\"deleted\",[1,4]]]";
+          var DIFFS = [["deleted",[1,4]]];
           test_4_apply_viewer_diff(DIFFS);
+      }
+
+      function ignore_text_nodes() {
+          console.log(test_16_broadcaster_get_text_at_path([1,1,0]));
+          test_16_broadcaster_add_text_nodes(["hello ", "world"]);
+          console.log(test_16_broadcaster_get_text_at_path([1,1,2]));
       }
     </script>
   </head>
@@ -207,6 +237,7 @@
     <a href="javascript:manual_apply_diff()">Manual apply diff!</a><br/>
     <a href="javascript:manual_apply_diff_css()">Manual get diff with css!</a><br/>
     <a href="javascript:manual_get_diff_delete()">Manual get diff with delete!</a><br/>
-    <a href="javascript:manual_apply_diff_delete()">Manual apply diff with delete!</a>
+    <a href="javascript:manual_apply_diff_delete()">Manual apply diff with delete!</a><br/>
+    <a href="javascript:ignore_text_nodes()">Manual ignore text nodes</a><br/>
   </body>
 </html>

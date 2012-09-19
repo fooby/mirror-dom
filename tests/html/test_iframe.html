@@ -1,0 +1,116 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.js"></script>
+    <script type="text/javascript" src="../../js/common.js"></script>
+    <script type="text/javascript" src="../../js/broadcaster.js"></script>
+    <script type="text/javascript" src="../../js/viewer.js"></script>
+    <script type="text/javascript" src="test_util.js"></script>
+    <script type="text/javascript" src="json2.js"></script>
+    <script type="text/javascript" >
+      var broadcaster_iframe = null;
+      var viewer_iframe = null;
+      var broadcaster = null;
+      var viewer = null;
+
+      // Initialisation
+      jQuery(document).ready(function() {
+          broadcaster_iframe = document.getElementById("broadcaster_iframe");          
+          viewer_iframe = document.getElementById("viewer_iframe");          
+          broadcaster = new MirrorDom.Broadcaster({
+              iframe: broadcaster_iframe
+          });
+          viewer = new MirrorDom.Viewer({
+              iframe: viewer_iframe,
+              blank_page: "blank.html"
+              //debug: true
+          });
+      });
+
+      // ************** UNIT TESTS ****************
+
+      // Test 1: Test detecting standard iframes
+      // ------------------------------------------
+
+      // This part is necessary as it's the first mechanism by which we detect
+      // iframes
+      function test_1_start_broadcaster_document() {
+          var data = broadcaster.start_full_document();
+      }
+
+      function test_1_fetch_iframe_paths() {
+          var iframe_paths = [];
+          for (key in broadcaster.child_iframes) {
+              iframe_paths.push(broadcaster.child_iframes[key]["ipath"]);
+          }
+          return JSON.stringify(iframe_paths);
+      }
+
+      // Test 2: Test detecting dynamic iframes
+      // ------------------------------------------
+      function test_2_add_dynamic_iframe() {
+          broadcaster_iframe.contentWindow.add_dynamic_iframe();
+      }
+
+      // Test 3: Remove all iframes
+      // ------------------------------------------
+      function test_3_remove_all_iframes() {
+          broadcaster_iframe.contentWindow.remove_all_iframes();
+      }
+
+      function test_3_get_diff() {
+          var diffs = broadcaster.get_diff();
+          return JSON.stringify(diffs);
+      }
+
+      // Test 4: Modify iframe path
+      // ------------------------------------------
+      function test_4_insert_element_at_start() {
+          broadcaster_iframe.contentWindow.add_div_at_start();
+      }
+
+      // Test 5: Process and get messages
+      // ------------------------------------------
+
+      // Execute the main logic of the broadcaster
+      function test_5_process_and_get_messages() {
+          var messages = [];
+          broadcaster.process_and_get_messages(messages);
+          // Iframe listings are now a necessary part of every update
+          var iframes = broadcaster.get_all_iframe_paths();
+          return JSON.stringify({"messages": messages, "iframes": iframes});
+      }
+
+      // Test 7: Receive update
+      // ------------------------------------------
+      function test_7_apply_updates(updates) {
+          var updates = JSON.parse(updates);
+          viewer.receive_updates(updates);
+      }
+
+      // *************** END TESTS *****************
+
+      function manual_list_iframes() {
+          var html = test_1_start_broadcaster_document();
+          var iframe_paths = test_1_fetch_iframe_paths();
+          console.log("IFrame paths: " + iframe_paths);
+      }
+
+      // The following functions are used for doing the testing verification
+      function get_broadcaster_html() {
+          return MDTestUtil.get_html(broadcaster_iframe);
+      }
+
+      function get_viewer_html() {
+          return MDTestUtil.get_html(viewer_iframe);
+      }
+
+    </script>
+  </head>
+  <body>
+    <iframe id="broadcaster_iframe" name="broadcaster_iframe" src="test_iframe_content.html" style="width: 100%; height: 200px"></iframe>
+    <iframe id="viewer_iframe" name="viewer_iframe" src="blank.html" style="width: 100%; height: 200px"></iframe>
+
+    <a href="javascript:manual_list_iframes()">Manual list iframes!</a><br/>
+  </body>
+</html>

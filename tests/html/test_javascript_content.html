@@ -1,7 +1,9 @@
 <html>
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8.23/jquery-ui.min.js"></script>
+    <link rel="StyleSheet" type="text/css" href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/themes/south-street/jquery-ui.css"/>
     <script type="text/javascript">
         var text = ["Pig", "Dog", "Cat", "Aardvark"];
         var colour = ["blue", "green", "red"];
@@ -39,6 +41,27 @@
             var div = jQuery("#thediv");
             div.remove();
         }
+
+        function make_and_show_dialog() {
+            var dialog_div = jQuery("#thedialogdiv");
+            if (dialog_div.length == 0) {
+                dialog_div = jQuery('<div id="thedialogdiv">Dialog goes here</div>').appendTo('body');
+                //dialog_div.dialog({"autoOpen": false});
+            }
+            //dialog_div.dialog('open');
+        }
+
+        function close_dialog() {
+            dialog_div = jQuery("#thedialogdiv").dialog('close');
+        }
+
+        function add_text_nodes(text_items) {
+            var div = jQuery("#thediv");
+            for (var i = 0; i < text_items.length; i++) {
+                div.append(text_items[i]);
+            }
+        }
+
     </script>
     <style type="text/css">
       table { border-collapse: collapse; }
@@ -76,7 +99,8 @@
       <input id="thetextinput" type="text" size="30" value="hello"></input>
     </div>
 
-    <a href="test_javascript_content2.html">Page 2</a>
+    <a href="test_javascript_content2.html">Page 2</a><br/>
+    <a href="javascript:make_and_show_dialog();">Dialog</a>
 
     <div id="thelastelement">This is the last element</div>
   </body>
