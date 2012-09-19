@@ -40,15 +40,25 @@ class Session(object):
         self.changelogs[frame_id] = c
 
     def add_diff(self, frame_id, diffs):
-        """
-
-        """
         next_id = self.get_next_change_id()
         # Raises KeyError if frame_id not found
         c = self.changelogs[frame_id]
         c.add_diff_set(next_id, diffs)
 
+    def update_frames(self, frame_paths):
+        frame_paths = set(tuple(f) for f in frame_paths)
+        removed = set(self.changelogs) - frame_paths
+        if removed:
+            frame_str = ", ".join('(' + ",".join(str(x)) + ')' for x in removed)
+            logger.debug("We've lost frames: %s", frame_str)
+        for r in removed:
+            del self.changelogs[r]
+
     def remove_frame_children(self, frame_path):
+        """
+        TODO: This may no longer be needed now that we're sending a big list of
+        iframe paths
+        """
         for f in self.changelogs.keys():
             if len(f) <= len(frame_path):
                 continue
@@ -69,6 +79,7 @@ class Changelog(object):
         :param diff:    List of diffs
         """
         self.diffs.append((next_id, diff))
+        logger.debug("Adding %s diffs to change id %s", len(diff), next_id)
 
     def __repr__(self):
         return pprint.pformat(vars(self))
@@ -105,7 +116,7 @@ class Changelog(object):
             logger.debug("getting diffs since [%s:] (len is %s)",
                     since_change_id, len(diffs))
             return {
-                "diffs": [i for (change_id, s) in self.diffs for i in s], # flatten
+                "diffs": [i for (change_id, s) in diffs for i in s], # flatten
                 "last_change_id": self.last_change_id,
             }
 
@@ -124,24 +135,56 @@ def _get_html_cleaner():
     cleaner.javascript = False
     return cleaner
 
-def sanitise_document(html):
+def sanitise_diffs(diffs):
+    # For now, we'll just sanitise in place
+    for d in diffs:
+        type = d[0]
+        if type == "node":
+            # [1] Path [2] inner html [3] attrs [4] prop tree
+            inner_html = d[2]
+            d[2] = sanitise_innerhtml(inner_html, tag=d[3]["nodeName"])
+    return diffs            
+
+def sanitise_innerhtml(innerhtml, tag="div"):
+    # We'll need to wipe out the div tag at the end
+    outerhtml = '<' + tag + '>' + innerhtml + '</' + tag + '>'
+    doc = sanitise_document(outerhtml, return_etree=True, use_html5lib=False)
+
+    # Ripped from
+    # http://stackoverflow.com/questions/6123351/equivalent-to-innerhtml-when-using-lxml-html-to-parse-html
+    final_html = (doc.text or '') + \
+            ''.join([lxml.etree.tostring(c) for c in doc.iterchildren()])
+    return final_html
+
+def sanitise_document(html, return_etree=False, use_html5lib=False):
     """
     Strip out nasties such as <meta>, <script> and other useless bits of
     information.
 
     NOTE: The sanitising process needs to work in agreement with the javascript function
     MirrorDom.Util.should_ignore_node
+
+    :param return_etree:        If True, return an etree object (instead of a string)
+
+    :param use_html5lib:        Use the html5lib parser, which is highly
+                                consistent and corrective of dodgy structure,
+                                but wreaks havoc when parsing fragments of HTML
+                                (i.e. it basically expects to parse an entire
+                                document)
     """
     #html_tree = lxml.html.soupparser.fromstring(html)
 
     # This converts into a well formed html document 
-    parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
-    html_tree = lxml.html.html5parser.fromstring(html, parser=parser)
+    if use_html5lib:
+        parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
+        html_tree = lxml.html.html5parser.fromstring(html, parser=parser)
+        temp = lxml.html.tostring(html_tree)
+        final_html_tree = lxml.html.fromstring(temp)
+    else:
+        final_html_tree = lxml.html.fromstring(html)
 
     #cleaner(html_tree)
 
-    temp = lxml.html.tostring(html_tree)
-    final_html_tree = lxml.html.fromstring(temp)
     cleaner = _get_html_cleaner()
     #import rpdb2
     #rpdb2.start_embedded_debugger("hello")
@@ -154,7 +197,10 @@ def sanitise_document(html):
         except KeyError:
             pass
 
-    return lxml.etree.tostring(final_html_tree)
+    if return_etree:
+        return final_html_tree
+    else:
+        return lxml.etree.tostring(final_html_tree)
 
 def create_storage():
     """
@@ -168,21 +214,30 @@ def create_storage():
     return Session()
 
 
-def handle_send_update(storage, messages):
-    """ Main entry point for handling all RPC requests
+def handle_send_update(storage, messages, iframes):
+    """ Main entry point for handling all update RPC requests
+
+    This RPC call handles and dispatches multiple messages.
 
     Message format:
-        [ <frame name>,
+        [ <frame path>,
           <update type>,
           <update data>,
         ]
 
-    Frame name: 'm' for main window, otherwise comma separated path for iframes
+    Frame path: List of path elements:
+        - 'm' for main window
+        - 'i' for iframe descent
+        - integer for node child offset
+
+    Iframes: List of ALL iframes (needed to remove "expired" iframes)
     """
     for frame_path, update_type, update_data in messages:
         frame_id = tuple(frame_path)
         #logger.debug("Got message %s:%s = %s", frame_id, update_type, update_data)
         globals()['handle_send_' + update_type](storage, frame_id, **update_data)
+
+    storage.update_frames(iframes)
 
 def handle_send_new_instance(storage, frame_id, html, props, url=None, iframes=None):
     """
@@ -219,6 +274,7 @@ def handle_send_diffs(storage, frame_id, diffs):
     returns the next last_change_id
     """
     logger.debug("add_diff: %s, %s", frame_id, pprint.pformat(diffs))
+    diffs = sanitise_diffs(diffs)
     try:
         storage.add_diff(frame_id, diffs)
     except KeyError:

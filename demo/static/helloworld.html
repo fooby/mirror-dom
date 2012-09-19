@@ -1,6 +1,8 @@
 <html>
   <head>
     <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8.23/jquery-ui.min.js"></script>
+    <link rel="StyleSheet" type="text/css" href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/themes/south-street/jquery-ui.css"/>
     <script type="text/javascript">
 
       var text = ["Hi", "Ho", "Fi", "Fo"];
@@ -18,8 +20,19 @@
           return false;
       }
 
+      function make_and_show_dialog() {
+          var dialog_div = jQuery("#thedialogdiv");
+          if (dialog_div.length == 0) {
+              dialog_div = jQuery('<div id="thedialogdiv">Dialog goes here</div>').appendTo('body');
+              dialog_div.dialog({"autoOpen": false, "title": "test dialog", "modal": true});
+          }
+          dialog_div.dialog('open');
+      }
+
+
       jQuery(function() {
           $("#spawn").click(spawn);
+          $("#dialogbutton").click(make_and_show_dialog);
       });
     </script>
   </head>
@@ -35,6 +48,7 @@
         <iframe src="/static/iframe_content.html" frameBorder="0"></iframe>
       </div>
       <button id="spawn">Spawn Something</button>
+      <button id="dialogbutton">Dialog</button>
     </div>
   </body>
 </html>

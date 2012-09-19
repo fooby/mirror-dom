@@ -31,6 +31,7 @@ MirrorDom.Viewer.prototype.init_options = function(options) {
 
     this.iframe = options.iframe;
     this.poll_interval = options.poll_interval != null ? options.poll_interval : 1000;
+    this.blank_page = options["blank_page"] != null ? options["blank_page"] : "about:blank";
     this.debug = options.debug;
 };
 
@@ -61,14 +62,13 @@ MirrorDom.Viewer.prototype.poll = function() {
         return;
     }
 
-    this.log("Polling");
-
     this.receiving = true;
     var self = this;
     var params = {};
     if (this.next_change_id != null) {
         params["change_id"] = this.next_change_id;
     }
+    this.log("Polling with change " + params["change_id"]);
     this.puller.pull("get_update", params, 
         function(result) {
             self.receive_updates(result);
@@ -77,61 +77,91 @@ MirrorDom.Viewer.prototype.poll = function() {
     );
 }
 
+
 MirrorDom.Viewer.prototype.receive_updates = function(result) {
+    this.apply_all_changesets(result["changesets"]);
+    this.next_change_id = result["last_change_id"] + 1;
+}
 
-    var changelogs = result["changesets"];
-
-    var doc_elem = this.get_document_element();
-
+MirrorDom.Viewer.prototype.apply_all_changesets = function(changesets, resume_pos) {
     // We have a list of changelogs for each iframe in our document.
     // The changelogs are ordered top to bottom, since the higher up frames
     // need to create the lower frames first, before those frame documents can
     // be managed.
+    //
+    // This function is RE-ENTRANT due to needing to wait for iframe load
+    // events and whatnot.
 
-
-    // Special handling for iframes, which may need to be specially managed
     var self = this;
-    var make_apply_iframe_func = function(iframe, cs, frame_path) {
+    function make_reentry_callback(pos) {
+        var executed = false;
         return function() {
-            console.log("Going for " + frame_path.join(",") + "!");
-            self.log("Applying changeset to " + frame_path.join(","));
-            var d = MirrorDom.Util.get_document_object_from_iframe(iframe);
-            self.apply_changeset(d.documentElement, cs);
+            if (executed) {
+                self.log("Re-entered on changeset " + pos + ", but already executed");
+                return;
+            }
+            self.log("Re-entry on changeset " + pos);
+            executed = true;
+            self.apply_all_changesets(changesets, pos);
         }
     }
-    
-    for (var i = 0; i < changelogs.length; i++) {
-        var frame_path = changelogs[i][0];
-        var changeset = changelogs[i][1];
 
-        // Don't bother with this changeset
-        if (!("diffs" in changeset)) {
+    // If we're resuming, then that means we came here from an event handler callback
+    var has_loaded = resume_pos != undefined;
+    
+    // This loop is weird...sometimes we have to wait for an iframe to load, at
+    // which point we terminate the current loop and resume once the event has
+    // fired.
+    for (var i = resume_pos ? resume_pos : 0; i < changesets.length; i++) {
+        //debugger;
+
+        var frame_path = changesets[i][0];
+        var changes = changesets[i][1];
+        if (!("diffs" in changes || "init_html" in changes)) {
+            // Don't bother with this changeset, nothing worth doing
             continue;
         }
-
         // Locate the iframe
-        var apply_node = MirrorDom.Util.node_at_upath(doc_elem, frame_path);
+        var iframe = MirrorDom.Util.node_at_upath(this.iframe, frame_path);
+        var iframe_doc = MirrorDom.Util.get_document_object_from_iframe(iframe);
 
-        if (frame_path[frame_path.length-1] == 'i') {
-            // Handle iframe
-            var iframe = apply_node;
+        // Commence iframe complexity
+        this.log("Iframe " + frame_path.join(",") +  " ready state: " + iframe_doc.readyState);
+        if (iframe_doc.readyState == "uninitialized") {
+            this.log("Initialising iframe: " + i + " on frame " + frame_path.join(","));
+            // Unset and re-set it to force a reload
+            iframe.src = "";
+            iframe.src = this.blank_page;
+            var callback = make_reentry_callback(i);
+            jQuery(iframe).load(callback);
 
-            apply_func = make_apply_iframe_func(iframe, changeset, frame_path);
+        } else if (iframe_doc.readyState == 'loading') {
+            // Scenario 1: Newly created iframe
+            this.log("Waiting for iframe to finish loading: " + i + " on frame " + frame_path.join(","));
+            var callback = make_reentry_callback(i);
+            jQuery(iframe).load(callback);
+            //jQuery(iframe_doc).ready(callback);
+            //window.setTimeout(callback, 20);
+            return;
+        } else if ("init_html" in changes && !has_loaded) {
+            // Scenario 2: IFrame exists, but we have init_html and want to
+            // start fresh. Let's load a blank page first.
+            this.log("Init HTML found for changeset " + i + " on frame " + frame_path.join(",") + ", resetting back to blank page");
+            // Unset and re-set it to force a reload
+            iframe.src = "";
+            iframe.src = this.blank_page;
+            var callback = make_reentry_callback(i);
+            jQuery(iframe).load(callback);
+            //window.setTimeout(callback, 20);
+            return;
+        } else {
+            // Scenario 3: Have diffs, let's proceed
+            this.apply_changeset(iframe_doc.documentElement, changes);
 
-            d = MirrorDom.Util.get_document_object_from_iframe(iframe);
-            if (d.readyState != 'complete') {
-                jQuery(iframe).one("load.mirrordom", apply_func);
-            } else {
-                apply_func();
-            }
-        } else if (frame_path[frame_path.length-1] == 'm') {
-            // Main iframe
-            this.apply_changeset(doc_elem, changeset);
+            // Remove item from changeset
+            has_loaded = false;
         }
-
     }
-
-    this.next_change_id = result["last_change_id"] + 1;
 }
 
 MirrorDom.Viewer.prototype.apply_changeset = function(doc_elem, changelog) {
@@ -141,7 +171,7 @@ MirrorDom.Viewer.prototype.apply_changeset = function(doc_elem, changelog) {
     }
 
     if (changelog.diffs) {
-        this.log(changelog.last_change_id + ": Applying diffs");
+        this.log(changelog.last_change_id + ": Applying " + changelog.diffs.length + " diffs");
         this.apply_diffs(doc_elem, changelog.diffs);
     }
 }
@@ -184,15 +214,6 @@ MirrorDom.Viewer.prototype.apply_props = function(changed, removed, node, ipath)
     }
 };
 
-MirrorDom.Viewer.prototype.apply_head_html = function(doc_elem, head_html) {
-    var head = doc_elem.getElementsByTagName('head')[0];
-    var new_doc = jQuery.parseXML('<head>' + head_html + '</head>');
-    var head = jQuery(head);
-    new_doc.children().each(function() {
-        jQuery(this).appendTo(head);
-    });
-}
-
 /**
  * Takes in a browser native XML element (NOT jquery wrapped)
  */
@@ -210,13 +231,16 @@ MirrorDom.Viewer.prototype.xml_to_string = function(xml_node) {
 }
 
 /**
+ * @param xml_node          jQuery XML node
+ * @param dest              jQuery destination
+ *
  * @param use_innerhtml     False if appending child by child
  *                          True if building an XML fragment to dump into the
  *                          node as one big lump
  *                          
  */
 MirrorDom.Viewer.prototype.copy_to_node = function(xml_node, dest, use_innerhtml) {
-    var children = xml_node.children();
+    var children = xml_node[0].childNodes;
     if (use_innerhtml) {
         var inner_html = [""];
         for (var i = 0; i < children.length; i++) {
@@ -229,9 +253,10 @@ MirrorDom.Viewer.prototype.copy_to_node = function(xml_node, dest, use_innerhtml
     else {
         for (var i = 0; i < children.length; i++) {
             var new_node = children[i];
+            var xml_string = this.xml_to_string(new_node);
             // TODO...can we just chuck the node straight in without converting
             // back to a string?
-            dest.append(this.xml_to_string(new_node));
+            dest.append(xml_string);
         }
     }
 }
@@ -248,46 +273,32 @@ MirrorDom.Viewer.prototype.copy_to_node = function(xml_node, dest, use_innerhtml
  *                      with child iframe document elements too.
  */
 MirrorDom.Viewer.prototype.apply_document = function(doc_elem, data) {
-    //doc_elem = doc_elem == null ? this.get_document_element() : doc_elem;
-
-    //var full_html = ['<html>', html, '</html>'].join("");
-    // note that viewer won't execute scripts from the client
-    // because we use innerHTML to insert (although the
-    // <script> elements will still be in the DOM)
-    //doc_elem.innerHTML = full_html;
-    //console.log(full_html);
-    //jQuery(doc_elem).html(full_html);
-    //console.log(full_html);
-    
+    var doc_object = doc_elem.ownerDocument;
     var new_doc = jQuery(jQuery.parseXML(data));
-    var new_head_node = new_doc.find("head");
 
-    if (new_head_node.length > 0) {
-        var current_head = doc_elem.getElementsByTagName('head')[0];
-        current_head = jQuery(current_head).empty();
-        this.copy_to_node(new_head_node, current_head, false);
-    }
-
+    // Set the body
     var current_body = doc_elem.getElementsByTagName('body')[0];
-
     if (current_body == null) {
         console.log(doc_elem.innerHTML);
         throw new Error("No current body, what's going on?!");
     }
-
     current_body = jQuery(current_body).empty();
     current_body[0].style.cssText = "";
-
     var new_body_node = new_doc.find("body");
     this.copy_to_node(new_body_node, current_body, true);
 
-    /*var body = doc_elem.getElementsByTagName('body')[0];
-
-    var head_html = data[0];
-    var body_html = data[1];
-    body.innerHTML = body_html;
-
-    this.apply_head_html(doc_elem, head_html);*/
+    // Set the head
+    var new_head_node = new_doc.find("head");
+    if (new_head_node.length > 0) {
+        var current_head = doc_elem.getElementsByTagName('head')[0];
+        current_head = jQuery(current_head).empty();
+        var doc_object = current_head[0].ownerDocument;
+        this.log("Stylesheets before: " + doc_object.styleSheets.length);
+        var links = new_head_node.find("link");
+        this.log("Found " + links.length + " link nodes");
+        this.copy_to_node(new_head_node, current_head, false);
+        this.log("Stylesheets after: " + doc_object.styleSheets.length);
+    }
 }
 
 /**
@@ -349,6 +360,7 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
                 for (var k in cloned_node.attributes) {
                     new_elem.setAttribute(k, cloned_node.attributes[k]);
                 }
+                parent.appendChild(new_elem);
                 jQuery(new_elem).html(diff[2]);
 
                 // Apply all properties which doesn't get transmitted in
@@ -360,11 +372,10 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
                     var pnode = MirrorDom.Util.node_at_path(new_elem, ppath);
                     this.apply_props(props[j][1], null, pnode, ppath);
                 }
-                this.apply_diffs(new_elem, diff[4]);
             } else {
                 var new_elem = document.createTextNode(diff[2]);
+                parent.appendChild(new_elem);
             }
-            parent.appendChild(new_elem);
 
         } else if (diff[0] == 'attribs') {
             // diff[2] = changed attributes

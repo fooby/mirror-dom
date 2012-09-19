@@ -26,7 +26,7 @@ MirrorDom.Util.process_property_paths = function(prop_paths) {
     return prop_names;
 }
 
-MirrorDom.Util.PROPERTY_NAMES = ["disabled", "value", "checked", "style.cssText", "className"];
+MirrorDom.Util.PROPERTY_NAMES = ["disabled", "value", "checked", "style.cssText", "className", "colSpan"];
 MirrorDom.Util.IGNORE_ATTRIBS = {"style": null};
 MirrorDom.Util.PROPERTY_LOOKUP = MirrorDom.Util.process_property_paths(MirrorDom.Util.PROPERTY_NAMES);
 
@@ -87,15 +87,75 @@ MirrorDom.Util.should_ignore_node = function(node) {
     return true;
 }
 
+
+/**
+ * For ignoring text nodes, we need to have a bit of a peek at the previous
+ * node to see whether we're in a consecutive text node
+ *
+ * Works like apply_ignore_nodes in reverse, but without text node
+ * considerations
+ */
+MirrorDom.Util.peek_next_node = function(node) {
+}
+
 /**
  * Given a DOM node, find the first sibling that we DON'T ignore.
+ *
+ * Ignores consecutive text nodes until the last one in the sequence.
+ * (Text node content needs to be retrieved IN REVERSE)
  */
 MirrorDom.Util.apply_ignore_nodes = function(node) {
-    while (node != null && MirrorDom.Util.should_ignore_node(node)) {
-        node = node.nextSibling;
+    var possible_next_node = null;
+
+    while (true) {
+        if (node == null) {
+            break;
+        }
+
+        // We need to peek ahead at the next node in order to perform
+        // consecutive text node elimination.
+        possible_next_node = node.nextSibling;
+        while (possible_next_node != null &&
+               MirrorDom.Util.should_ignore_node(possible_next_node)) {
+            possible_next_node = possible_next_node.nextSibling;
+        }
+
+        var found = true;
+
+        // Apply text node elimination. We'll accept text nodes as long as their
+        // immediate next possible sibling isn't also a text node
+        if (MirrorDom.Util.should_ignore_node(node)) {
+            found = false;
+        } else if (possible_next_node != null &&
+                node.nodeType == 3 &&
+                possible_next_node.nodeType == 3) {
+            //console.log("Skipping consecutive text node")
+            found = false;
+        }
+
+        if (found) {
+            break;
+        }
+
+        node = possible_next_node;
     }
 
     return node;
+}
+
+/**
+ * Assumes we're at the LAST text node in a chain of consecutive text nodes.
+ * Constructs string by going backwards.
+ */
+MirrorDom.Util.get_text_node_content = function(node) {
+    var value = [];
+    while (node != null && node.nodeType == 3) {
+        if (!MirrorDom.Util.should_ignore_node(node)) {
+            value.unshift(node.nodeValue);
+        }
+        node = node.previousSibling;
+    }
+    return value.join("");
 }
 
 /**
@@ -183,7 +243,7 @@ MirrorDom.Util.get_properties = function(node) {
 }
 
 
-MirrorDom.Util.ipath_equal = function(x, y) {
+MirrorDom.Util.path_equal = function(x, y) {
     if (x.length != y.length) { return false; }
     for (var i = 0; i < x.length; i++) {
         if (x[i] != y[i]) { return false; }
@@ -192,14 +252,16 @@ MirrorDom.Util.ipath_equal = function(x, y) {
 }
 
 /**
- * Returns true if x is equal to or a child of test
+ * Returns true if "inside" is equal to or a child of "outside"
  *
  * e.g. [1,2,4,5,6], [1,2,4] = true
+ *
+ * Note that "outside" should be the SHORTER path (shorter means higher up)
  */
-MirrorDom.Util.is_inside_ipath = function(x, test) {
-    if (x.length < test.length) { return false; }
-    for (var i = 0; i < test.length; i++) {
-        if (test[i] != x[i]) { 
+MirrorDom.Util.is_inside_path = function(inside, outside) {
+    if (inside.length < outside.length) { return false; }
+    for (var i = 0; i < outside.length; i++) {
+        if (outside[i] != inside[i]) { 
             return false;
         }
     }
@@ -242,6 +304,9 @@ MirrorDom.Util.node_at_upath = function(doc, upath) {
             case 'm':
                 // Special case: Should be the root of the main frame document
                 // Ignore this and keep proceeding.
+                if (node.nodeName.toLowerCase() == "iframe") {
+                    in_iframe = true;
+                }
                 break;
             case 'i':
                 // Descend into iframe - root at this point should be an
@@ -258,6 +323,7 @@ MirrorDom.Util.node_at_upath = function(doc, upath) {
                 if (in_iframe) {
                     var d = MirrorDom.Util.get_document_object_from_iframe(node);
                     node = d.documentElement;
+                    in_iframe = false;
                 }
 
                 // should be a number
@@ -290,7 +356,7 @@ MirrorDom.Util.describe_node = function(node) {
 /**
  * Debug utility, returns a string describing the node path
  */
-MirrorDom.Util.describe_node_at_ipath = function(root, ipath) {
+MirrorDom.Util.describe_node_at_path = function(root, ipath) {
     var node = root;
     var path_desc = [];
     var terminate = false;
@@ -337,7 +403,13 @@ MirrorDom.Util.describe_node_at_upath = function(root, upath) {
             case 'm':
                 // Special case: Should be the root of the main frame document
                 // Ignore this and keep proceeding.
-                path_desc.push("m: Ignoring");
+                if (node.nodeName.toLowerCase() != 'iframe') {
+                    var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                    node = d.documentElement;
+                    path_desc.push("m: Descending into main iframe");
+                } else {
+                    path_desc.push("m: Ignoring");
+                }
                 break;
             case 'i':
                 // Descend into iframe - root at this point should be an

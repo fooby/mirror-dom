@@ -11,6 +11,7 @@ javascript and python internal mirrordom functions.
 import sys
 import os
 import json
+import time
 
 import util
 import test_javascript
@@ -32,7 +33,7 @@ def teardownModule():
 class XMLCompareException(Exception):
     pass
 
-class TestMirrorDom(util.TestBase):
+class TestServer(util.TestBase):
     UNSANITARY_HTML = """\
 <html>
   <head>
@@ -92,7 +93,114 @@ class TestMirrorDom(util.TestBase):
         result_html = mirrordom.server.sanitise_document(from_html)
         assert self.compare_html(to_html, result_html, clean=False)
 
-class TestMirrorDom_with_FF(util.TestBrowserBase):
+
+    UNSANITARY_INNERHTML = """
+    hello world
+    <div id="blah">
+        <iframe src="http://removeme"> </iframe>
+    </div>
+    hlerhre
+    <script type="text/javascript">nope</script>
+    bye world
+    """
+
+    SANITARY_INNERHTML = """
+    hello world
+    <div id="blah">
+        <iframe> </iframe>
+    </div>
+    hlerhre
+    bye world
+    """
+    def test_sanitise_innerhtml(self):
+        """
+        Test 2: Strip tags from node inner html (used for node diffs)
+        """
+        from_html = self.UNSANITARY_INNERHTML
+        to_html = self.SANITARY_INNERHTML
+        result_html = mirrordom.server.sanitise_innerhtml(from_html)
+        assert self.compare_html(to_html, result_html, clean=False)
+
+    UNSANITARY_INNERHTML2 = """
+    <tbody>
+        <tr>
+            <th class="heloworld">Blah</th>
+            <th class="heloworld2">Blah2</th>
+        </tr>
+        <tr>
+            <td style="background-color: blue;">SDF</td>
+            <td style="color: green;">axg</td>
+        </tr>
+    </tbody>
+    """
+
+    SANITARY_INNERHTML2 = """
+    <tbody>
+        <tr>
+            <th class="heloworld">Blah</th>
+            <th class="heloworld2">Blah2</th>
+        </tr>
+        <tr>
+            <td style="background-color: blue;">SDF</td>
+            <td style="color: green;">axg</td>
+        </tr>
+    </tbody>
+    """
+    def test_sanitise_innerhtml2(self):
+        """ Test 3: Strip tags from complex inner html """
+        from_html = self.UNSANITARY_INNERHTML2
+        to_html = self.SANITARY_INNERHTML2
+        result_html = mirrordom.server.sanitise_innerhtml(from_html, tag="table")
+        # html5parser mangles the input too much, disable it
+        assert self.compare_html(to_html, result_html, clean=False,
+                parse_with_html5parser=False)
+
+    UNSANITARY_INNERHTML3 = """<td style="background-color: blue;">SDF</td>"""
+    SANITARY_INNERHTML3 = """<td style="background-color: blue;">SDF</td>"""
+    def test_sanitise_innerhtml3(self):
+        """ Test 3: Strip tags from complex inner html """
+        from_html = self.UNSANITARY_INNERHTML3
+        to_html = self.SANITARY_INNERHTML3
+        result_html = mirrordom.server.sanitise_innerhtml(from_html, tag="tr")
+        # html5parser mangles the input too much, disable it
+        assert self.compare_html(to_html, result_html, clean=False,
+                parse_with_html5parser=False)
+
+
+    UNSANITARY_INNERHTML4 = """
+    <html>
+      <body>
+        <table>
+          <form name="badform">
+            <tr><td>Blah2</td></tr>
+          </form>
+        </table>
+      </body>
+    </html>
+    """
+
+    SANITARY_INNERHTML4 = """
+    <html>
+      <body>
+        <table>
+          <form name="badform">
+            <tr><td>Blah2</td></tr>
+          </form>
+        </table>
+      </body>
+    </html>
+    """
+    def test_sanitise_innerhtml4(self):
+        from_html = self.UNSANITARY_INNERHTML4
+        to_html = self.SANITARY_INNERHTML4
+        result_html = mirrordom.server.sanitise_document(from_html)
+        # html5parser mangles the input too much, disable it
+        assert self.compare_html(to_html, result_html, clean=False,
+                parse_with_html5parser=False)
+
+
+
+class TestFirefox(util.TestBrowserBase):
     HTML_FILE = "test_mirrordom.html"
 
     @classmethod
@@ -105,7 +213,10 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
 
         #print "Broadcaster: %s" % (broadcaster_html)
         #print "Viewer: %s" % (viewer_html)
-        return self.compare_html(broadcaster_html, viewer_html, clean=True)
+
+        # html5parser mangles the input too much, disable it
+        return self.compare_html(broadcaster_html, viewer_html, clean=True,
+                parse_with_html5parser=False)
 
     def test_init_html(self):
         """
@@ -116,13 +227,14 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         """
         self.init_webdriver()
 
-        init_html_json = self.webdriver.execute_script(
+        init_html = self.webdriver.execute_script(
                 "return test_1_get_broadcaster_document()")
-        init_html = json.loads(init_html_json)
+        init_html = json.loads(init_html)
         result_html = mirrordom.server.sanitise_document(init_html)
-        result_html_json = json.dumps(result_html)
+        print "==RESULT HTML=="
+        print json.dumps(result_html)
         self.webdriver.execute_script("test_1_apply_viewer_document(arguments[0])",
-                result_html_json)
+                result_html)
 
         assert self.compare_frames()
 
@@ -131,7 +243,6 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         Test 2: Basic diff transfer
         """
         self.init_webdriver()
-
         # Replicate the initial test
         self.test_init_html()
 
@@ -139,10 +250,10 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         self.webdriver.execute_script("test_2_modify_broadcaster_document()")
         diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
         diff = json.loads(diff)
-        print diff
-        # TODO: Sanitise diff in mirrordom.server?
-        result = json.dumps(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", result)
+        print "==DIFF=="
+        print json.dumps(diff)
+        diff = mirrordom.server.sanitise_diffs(diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
 
         assert self.compare_frames()
 
@@ -167,25 +278,19 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
 
         self.webdriver.switch_to_default_content()
         diff = self.webdriver.execute_script("return test_3_get_broadcaster_all_property_diffs()")
-        result = json.loads(diff)
-
-        #print result
 
         # Only properties
-        assert all(d[0] == "props" for d in result)
-        assert util.diff_contains_changed_property_key(result, "value")
+        assert all(d[0] == "props" for d in diff)
+        assert util.diff_contains_changed_property_key(diff, "value")
 
         # Should be a border in there somewhere (note: IE returns individual
         # border rules for each side, FF retains the single border rule)
-        assert util.diff_contains_changed_property_value(result, "purple")
+        assert util.diff_contains_changed_property_value(diff, "purple")
 
-        #print result
-
-        # TODO: Sanitise diff in mirrordom.server?
-        result = json.dumps(result)
+        diff = mirrordom.server.sanitise_diffs(diff)
 
         # We can reuse test 2's diff apply thing
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", result)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
 
         # Verify the diff made it through
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -222,6 +327,20 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         assert link_node.get_attribute("rel").lower() == "stylesheet"
         assert link_node.get_attribute("type").lower() == "text/css"
 
+        # Count stylesheets
+        #num_stylesheets = self.webdriver.execute_script("return document.styleSheets.length;")
+        stylesheet_hrefs = self.webdriver.execute_script("""
+            var hrefs=[];
+            for (var i = 0; i < document.styleSheets.length; i++) {
+              if (document.styleSheets[i].href != undefined) {
+                hrefs.push(document.styleSheets[i].href);
+              }
+            }
+            return hrefs;
+        """)
+
+        assert any(x.endswith("test_mirrordom.css") for x in stylesheet_hrefs)
+
     def test_diff_transfer_inserted_element(self):
         """
         Test 5: Basic diff transfer, with an element inserted in the middle of
@@ -233,16 +352,35 @@ class TestMirrorDom_with_FF(util.TestBrowserBase):
         self.test_init_html()
 
         # Now let's go further and modify the document
-        self.webdriver.execute_script("test_4_modify_broadcaster_document_insert_element()")
+        self.webdriver.execute_script("test_5_modify_broadcaster_document_insert_element()")
         diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
         diff = json.loads(diff)
         print diff
-        # TODO: Sanitise diff in mirrordom.server?
-        result = json.dumps(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", result)
+        diff = mirrordom.server.sanitise_diffs(diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
         assert self.compare_frames()
 
-class TestMirrorDom_with_IE(TestMirrorDom_with_FF):
+    def test_diff_transfer_inserted_table(self):
+        """
+        Test 6: More advanced diff transfer, with big table
+        """
+        self.init_webdriver()
+        # Replicate the initial test
+        self.test_init_html()
+        # Now let's go further and modify the document
+        self.webdriver.execute_script("test_6_modify_broadcaster_document_insert_table()")
+        diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
+        diff = json.loads(diff)
+        diff = mirrordom.server.sanitise_diffs(diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
+        assert self.compare_frames()
+
+class TestIE(TestFirefox):
     @classmethod
     def _create_webdriver(cls):
         return util.get_debug_ie_webdriver()
+
+class TestChrome(TestFirefox):
+    @classmethod
+    def _create_webdriver(cls):
+        return util.get_debug_chrome_webdriver()

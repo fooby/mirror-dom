@@ -16,7 +16,7 @@ def setupModule():
 def teardownModule():
     util.stop_webserver()
 
-class TestJavascriptFF(util.TestBrowserBase):
+class TestFirefox(util.TestBrowserBase):
 
     HTML_FILE = "test_javascript.html"
 
@@ -97,7 +97,6 @@ class TestJavascriptFF(util.TestBrowserBase):
         # This triggers clone_dom() in the broadcaster js object, so that diffing works
         self.webdriver.execute_script("test_3_modify_broadcaster_document_with_add_node()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
-        result = json.loads(result)
         print result
 
         # Expected result should be similar to:
@@ -127,14 +126,12 @@ class TestJavascriptFF(util.TestBrowserBase):
             u'background-color: red;'}, u'nodeType': 1, u'nodeName': u'DIV',
             u'nodeValue': None}, []]]
         self.webdriver.execute_script("test_4_setup_viewer_document()")
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])",
-                json.dumps(diff))
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
 
     def test_get_initial_property_diff(self):
         """ Test 5: Retrieve initial property diff """
         self.init_webdriver()
         result = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
-        result = json.loads(result)
         print result
 
         # CSS rules only
@@ -156,7 +153,6 @@ class TestJavascriptFF(util.TestBrowserBase):
         self.init_webdriver()
         self.webdriver.execute_script("test_6_modify_broadcaster_document_with_css()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
-        result = json.loads(result)
         print result
 
         # Extra class added, plus css background-color
@@ -167,7 +163,6 @@ class TestJavascriptFF(util.TestBrowserBase):
         self.init_webdriver()
         self.webdriver.execute_script("test_7_modify_broadcaster_document_with_attribute()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
-        result = json.loads(result)
         print result
         assert len(result) > 0
 
@@ -187,7 +182,6 @@ class TestJavascriptFF(util.TestBrowserBase):
         # Get the diff
         self.webdriver.switch_to_default_content()
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
-        result = json.loads(result)
         print result
 
         # Should be there
@@ -198,7 +192,6 @@ class TestJavascriptFF(util.TestBrowserBase):
         self.init_webdriver()
         self.webdriver.execute_script("test_9_modify_broadcaster_document_with_delete_node()")
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
-        result = json.loads(result)
         print result
         assert len(result) > 0
 
@@ -220,8 +213,7 @@ class TestJavascriptFF(util.TestBrowserBase):
 
         # Ok, change the property
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])",
-                json.dumps(diff))
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -249,8 +241,7 @@ class TestJavascriptFF(util.TestBrowserBase):
 
         # Ok, change the attrib
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])",
-                json.dumps(diff))
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -278,8 +269,7 @@ class TestJavascriptFF(util.TestBrowserBase):
         assert div != None
 
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])",
-                json.dumps(diff))
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
 
         # Shouldn't be there now
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -318,9 +308,8 @@ class TestJavascriptFF(util.TestBrowserBase):
         # Ok, change the property
         self.webdriver.switch_to_default_content()
         diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
-        diff = json.loads(diff)
         print "Diff: %s" % (diff)
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -329,8 +318,39 @@ class TestJavascriptFF(util.TestBrowserBase):
         print "Got: %s" % (input_value)
         assert input_value == test_value
 
-class TestJavascriptIE(TestJavascriptFF):
+    def test_jquery_dialog_open(self):
+        """ Test 14: Open jquery dialog, get diff """
+        self.init_webdriver()
+        self.webdriver.execute_script("test_14_broadcaster_open_jquery_dialog()")
+        diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
+        print "Diff: %s" % (diff)
+
+    def test_jquery_dialog_close(self):
+        """ Test 15: Open jquery dialog, get diff """
+        self.test_jquery_dialog_open()
+        diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
+        print "Diff: %s" % (diff)
+
+    def test_multiple_text_nodes(self):
+        """ Test 16: Test multiple consecutive text nodes """
+        self.init_webdriver()
+        text_nodes = ["multiple ", " text ", "nodes"]
+        # Existing text
+        text_1 = self.webdriver.execute_script("""return test_16_broadcaster_get_text_at_path([1,1,0])""")
+        assert text_1.strip() == "Blaurgh"
+        self.webdriver.execute_script("test_16_broadcaster_add_text_nodes(arguments[0])", text_nodes)
+        # Assumes the text is added to div at [1,1] at will be at position 2
+        text_2 = self.webdriver.execute_script("""return test_16_broadcaster_get_text_at_path([1,1,2])""")
+        assert text_2.strip() == "".join(text_nodes)
+
+
+class TestIE(TestFirefox):
 
     @classmethod
     def _create_webdriver(cls):
         return util.get_debug_ie_webdriver()
+
+class TestChrome(TestFirefox):
+    @classmethod
+    def _create_webdriver(cls):
+        return util.get_debug_chrome_webdriver()

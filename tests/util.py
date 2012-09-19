@@ -153,6 +153,7 @@ def get_debug_firefox_webdriver():
     """
     Get Firefox webdriver with firebug enabled and some logging output
     """
+    print "Starting firefox webdriver"
     profile = webdriver.FirefoxProfile()
     firebug = get_relative_path("stuff", "firebug-1.10.2-fx.xpi")
     profile.set_preference("extensions.firebug.currentVersion", "1.10.2")
@@ -171,9 +172,14 @@ def get_debug_firefox_webdriver():
     return webdriver.Firefox(profile)
 
 def get_debug_ie_webdriver():
+    print "Starting IE webdriver"
     ie_log = get_relative_path("logs", "ie.log")
     log_level = "DEBUG"
     return webdriver.Ie(log_level=log_level, log_file=ie_log)
+
+def get_debug_chrome_webdriver():
+    print "Starting chrome webdriver"
+    return webdriver.Chrome()
 
 # -----------------------------------------------------------------------------
 # XML hacks
@@ -222,7 +228,9 @@ def convert_to_lxml_html(doc):
 # Internet Explorer HTML comparison hacks
 
 NODE_DEFAULTS = {
-    "input": {"size": "50", "type": "text"}
+    "input": {"size": "50", "type": "text"},
+    "th": {"colspan": "1"},
+    "td": {"colspan": "1"}
 }
 
 def augment_single_node_defaults_for_ie(node):
@@ -294,6 +302,7 @@ class TestBase(object):
             should_strip_localhost_hrefs_for_ie=True,
             should_remove_title_for_ie=True,
             strip_style_attributes=True,
+            parse_with_html5parser=True,
             clean=False):
         """
         Yep, compare two target documents together
@@ -324,18 +333,28 @@ class TestBase(object):
         :param strip_style_attributes:
                         IE's style attributes are unworkable for comparison
 
+        :param parse_with_html5parser:
+                        Use the highly tolerant HTML parsing which corrects for
+                        unexpected structures.
+
         :param clean:   Try to perform some extra cleaning using the lxml html
                         Cleaner class to make the comparison less brittle.
         """
-        compare = LHTML5OutputChecker()
+        if parse_with_html5parser:
+            want_doc = parse_html_string(want)
+            got_doc = parse_html_string(got)
 
-        want_doc = parse_html_string(want)
-        got_doc = parse_html_string(got)
+            # Convert lxml.etree._Element tree to lxml.html.HtmlElement tree as we
+            # want to use a bunch of lxml.html functionality.
+            want_doc = convert_to_lxml_html(want_doc)
+            got_doc = convert_to_lxml_html(got_doc)
 
-        # Convert lxml.etree._Element tree to lxml.html.HtmlElement tree as we
-        # want to use a bunch of lxml.html functionality.
-        want_doc = convert_to_lxml_html(want_doc)
-        got_doc = convert_to_lxml_html(got_doc)
+            # Use hacked compare checker
+            compare = LHTML5OutputChecker()
+        else:
+            want_doc = lxml.html.fromstring(want)
+            got_doc = lxml.html.fromstring(got)
+            compare = lxml.doctestcompare.LHTMLOutputChecker()
 
         if should_augment_defaults_for_ie:
             augment_tree_defaults_for_ie(want_doc)

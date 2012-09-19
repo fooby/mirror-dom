@@ -45,16 +45,21 @@ h = logging.StreamHandler(sys.stdout)
 logger.addHandler(h)
 
 
-def get_mirrordom_uri(environ=None):
+def get_mirrordom_uri(page="mirrordom", environ=None):
     if environ is None:
         environ = bottle.request.environ
-    uri = wsgiref.util.application_uri(environ) + 'mirrordom'
+    uri = wsgiref.util.application_uri(environ) + page
     return uri
+
+@app.route('/blank')
+def blank():
+    return "<html><head></head><body></body></html>"
 
 @app.route('/viewer')
 def viewer():
     """ Serve the viewer page """
-    return bottle.template('simple_viewer', mirrordom_uri=get_mirrordom_uri())
+    return bottle.template('simple_viewer', mirrordom_uri=get_mirrordom_uri(),
+            blank_page=get_mirrordom_uri("blank"))
 
 @app.route('/broadcaster')
 def broadcaster():

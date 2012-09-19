@@ -271,7 +271,7 @@ MirrorDom.Broadcaster.prototype.make_dom_clone = function(doc_elem) {
 // ----------------------------------------------------------------------------
 MirrorDom.Broadcaster.prototype.handle_load_page = function() {
     this.log("Loaded new page at " + this.get_frame_path().join(",") + " !" );
-    this.was_new_page_loaded = true;        
+    this.was_new_page_loaded = true;
     this.rewrite_link_targets();
 }
 
@@ -342,7 +342,10 @@ MirrorDom.Broadcaster.prototype.poll = function() {
     this.process_and_get_messages(messages);
 
     if (messages.length > 0) {
-        this.pusher.push('send_update', {"messages": messages});
+        // Grab iframes to inform the server which iframes are in fact still
+        // active after these latest changes.
+        var iframes = this.get_all_iframe_paths();
+        this.pusher.push('send_update', {"messages": messages, "iframes": iframes});
     }
 
     //this.destroy();
@@ -375,6 +378,23 @@ MirrorDom.Broadcaster.prototype.stop_interval = function() {
     }
 };
 
+/**
+ * Populate a list with all iframe paths
+ *
+ * @param paths     The list the populate
+ *
+ * No return value
+ */
+MirrorDom.Broadcaster.prototype.get_all_iframe_paths = function(paths) {
+    if (paths === undefined) {
+        paths = [];
+    }
+    paths.push(this.get_frame_path());
+    for (var key in this.child_iframes) {
+        this.child_iframes[key]["broadcaster"].get_all_iframe_paths(paths);
+    }
+    return paths;
+}
 
 /**
  * Remove all broadcaster references to our iframes (usually done when doing a
@@ -666,7 +686,7 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
     switch (node.nodeType) {
         case 1:
             // ELEMENT
-            var dom_iterator = new MirrorDom.DomIterator(node);
+            var dom_iterator = new MirrorDom.DomIterator(node, ipath);
             var prop_diffs = [];
             // We've detected a new Element node. We want to continue iterating
             // through the added node's structure.
@@ -681,7 +701,8 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
             break;
         case 3:
             // TEXT
-            diffs.push(['text', ipath, node.textContent]);
+            //diffs.push(['text', ipath, node.textContent]);
+            diffs.push(['text', ipath, MirrorDom.Util.get_text_node_content(node)]);
             break;
     }
 }
@@ -695,12 +716,14 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
  * @param cnode         Node cloned in clone_node() (not an actual DOM node)
  */
 MirrorDom.Broadcaster.prototype.handle_diff_delete_nodes = function(diffs, ipath, cnode) {
+    diffs.push(['deleted', ipath.slice()]);
+
     ipath = ipath.slice();
     // Scan for iframes which have been deleted
     while (cnode) {
         for (var key in this.child_iframes) {
             var child_iframe_ipath = this.child_iframes[key]['ipath'] ;
-            if (MirrorDom.Util.is_inside_ipath(ipath, child_iframe_ipath)) {
+            if (MirrorDom.Util.is_inside_path(child_iframe_ipath, ipath)) {
                 // Remove iframe object
                 this.log("Removing iframe at " + child_iframe_ipath + "! (Because of deleted node " + ipath + ")");
                 this.child_iframes[key]['broadcaster'].destroy();
@@ -839,14 +862,21 @@ MirrorDom.Broadcaster.prototype.log = function(msg) {
 // DOM iterator class
 // ============================================================================
 
-MirrorDom.DomIterator = function(root) {
+/**
+ * @param base_ipath    If iterating through a subset of a document, then
+ *                      base_ipath is the path to the root.
+ *                      Will be passed to the handlers along with the relative
+ *                      path.
+ */
+MirrorDom.DomIterator = function(root, base_ipath) {
     this.root = root;
+    this.base_ipath = base_ipath === undefined ? [] : base_ipath;
     this.handlers = [];
 }
 
 /**
  * @param handler           A callback which accepts the following arguments:
- *                          (node, ipath, data)
+ *                          (node, base_ipath, ipath, data)
  * @param data              A mutable data object to pass back to the handler,
  *                          or null if not using
  */
@@ -901,7 +931,7 @@ MirrorDom.DomIterator.prototype.apply_handlers = function(node, ipath) {
     for (var i=0; i < this.handlers.length; i++) {
         var f = this.handlers[i][0];
         var data = this.handlers[i][1];
-        f(node, ipath, data);
+        f(node, this.base_ipath, ipath, data);
     }
 }
 
@@ -911,7 +941,7 @@ MirrorDom.DomIterator.prototype.apply_handlers = function(node, ipath) {
 /**
  * @param data      Data should be an array
  */
-MirrorDom.Broadcaster.prototype.collect_props_from_dom_iterator = function(node, ipath, data) {
+MirrorDom.Broadcaster.prototype.collect_props_from_dom_iterator = function(node, base_ipath, ipath, data) {
     if (node.nodeType == 1) {
         var props = MirrorDom.Util.get_properties(node);
         if (props != null) {
@@ -925,8 +955,9 @@ MirrorDom.Broadcaster.prototype.collect_props_from_dom_iterator = function(node,
  *
  * To be used with the DomIterator class.
  */
-MirrorDom.Broadcaster.prototype.find_iframes_from_dom_iterator = function(node, ipath) {
+MirrorDom.Broadcaster.prototype.find_iframes_from_dom_iterator = function(node, base_ipath, ipath) {
+    var full_path = base_ipath.concat(ipath);
     if (node.nodeName.toLowerCase() == 'iframe') {
-        this.register_new_iframe(node, ipath);
+        this.register_new_iframe(node, full_path);
     }
 }
