@@ -31,6 +31,17 @@ MirrorDom.Util.IGNORE_ATTRIBS = {"style": null};
 MirrorDom.Util.PROPERTY_LOOKUP = MirrorDom.Util.process_property_paths(MirrorDom.Util.PROPERTY_NAMES);
 
 /**
+ * @param node      
+ */
+MirrorDom.Util.get_property_lookup_list = function(node) {
+    if (node.namespaceURI == "http://www.w3.org/2000/svg") {
+        return [];
+    } else {
+        return MirrorDom.Util.PROPERTY_LOOKUP;
+    }
+}
+
+/**
  * @param iframe        Iframe object
  */
 MirrorDom.Util.get_document_object_from_iframe = function(iframe) {

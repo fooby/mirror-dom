@@ -131,6 +131,9 @@ def _get_html_cleaner():
     cleaner.embedded = False
     cleaner.safe_attrs_only = False
 
+    # Hmm...we want to keep SVG tags
+    cleaner.remove_unknown_tags = False
+
     # If True, the cleaner will wipe out <link> elements
     cleaner.javascript = False
     return cleaner
@@ -172,8 +175,6 @@ def sanitise_document(html, return_etree=False, use_html5lib=False):
                                 (i.e. it basically expects to parse an entire
                                 document)
     """
-    #html_tree = lxml.html.soupparser.fromstring(html)
-
     # This converts into a well formed html document 
     if use_html5lib:
         parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
@@ -183,11 +184,7 @@ def sanitise_document(html, return_etree=False, use_html5lib=False):
     else:
         final_html_tree = lxml.html.fromstring(html)
 
-    #cleaner(html_tree)
-
     cleaner = _get_html_cleaner()
-    #import rpdb2
-    #rpdb2.start_embedded_debugger("hello")
     cleaner(final_html_tree)
 
     # Find iframes and strip src

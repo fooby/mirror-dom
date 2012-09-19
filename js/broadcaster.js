@@ -221,6 +221,7 @@ MirrorDom.Broadcaster.prototype.start_full_document = function() {
     // Apply our handling of new nodes
     dom_iterator.attach_handler(jQuery.proxy(this.find_iframes_from_dom_iterator, this));
     dom_iterator.attach_handler(this.collect_props_from_dom_iterator, prop_diffs);
+    dom_iterator.attach_handler(jQuery.proxy(this.rewrite_targets_in_dom_iterator, this));
     results = dom_iterator.run();
 
     // Clone the DOM
@@ -281,9 +282,9 @@ MirrorDom.Broadcaster.prototype.handle_load_page = function() {
 MirrorDom.Broadcaster.prototype.rewrite_link_targets = function() {
     var iframe_name = this.iframe.name;
     var doc_elem = this.get_document_element();
-    var links = jQuery("a[target='_top']", doc_elem);
-    links.attr("target", iframe_name);
-    this.log("Rewrote " + links.length + " link targets to \"" + iframe_name + "\"");
+    var links_forms = jQuery("[target='_top']", doc_elem);
+    links_forms.attr("target", iframe_name);
+    this.log("Rewrote " + links_forms.length + " link/form targets to \"" + iframe_name + "\"");
 }
 
 // ----------------------------------------------------------------------------
@@ -694,6 +695,7 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
             dom_iterator.attach_handler(jQuery.proxy(this.find_iframes_from_dom_iterator, this));
             // 2) Collect node properties relative to the newly added node
             dom_iterator.attach_handler(this.collect_props_from_dom_iterator, prop_diffs);
+            dom_iterator.attach_handler(jQuery.proxy(this.rewrite_targets_in_dom_iterator, this));
             dom_iterator.run();
 
             // Ok, add the new node
@@ -745,15 +747,16 @@ MirrorDom.Broadcaster.prototype.handle_diff_node_properties = function(diffs, ip
     var diff = false;
 
     // include properties that aren't reflected as DOM attributes
-    for (i=0; i < MirrorDom.Util.PROPERTY_LOOKUP.length; i++) {
-        var prop_text = MirrorDom.Util.PROPERTY_LOOKUP[i][0];
-        var prop_lookup = MirrorDom.Util.PROPERTY_LOOKUP[i][1];
+    var property_lookup_list = MirrorDom.Util.get_property_lookup_list(dnode);
+    for (i=0; i < property_lookup_list.length; i++) {
+        var prop_key = property_lookup_list[i][0];
+        var prop_lookup = property_lookup_list[i][1];
         var dprop_result = MirrorDom.Util.get_property(dnode, prop_lookup);
         var dprop_found = dprop_result[0];
         var dprop_value = dprop_result[1];
 
-        var cprop_found = cnode.props != null ? prop_text in cnode.props : false;
-        var cprop_value = cnode.props != null ? cnode.props[prop_text] : null;
+        var cprop_found = cnode.props != null ? prop_key in cnode.props : false;
+        var cprop_value = cnode.props != null ? cnode.props[prop_key] : null;
 
         if (dprop_found && !cprop_found) {
             if (dprop_value == "") {
@@ -761,15 +764,15 @@ MirrorDom.Broadcaster.prototype.handle_diff_node_properties = function(diffs, ip
                 continue;
             }
             // Property added
-            changed_props[prop_text] = dprop_value;          
+            changed_props[prop_key] = dprop_value;          
             diff = true;
         } else if (!dprop_found && cprop_found) {
             // Property removed
-            removed_props.push(prop_text);
+            removed_props.push(prop_key);
             diff = true;
         } else if (cprop_found && dprop_found && dprop_value != cprop_value) {
             // Property changed
-            changed_props[prop_text] = dprop_value;          
+            changed_props[prop_key] = dprop_value;          
             diff = true;
         }
     }
@@ -959,5 +962,15 @@ MirrorDom.Broadcaster.prototype.find_iframes_from_dom_iterator = function(node, 
     var full_path = base_ipath.concat(ipath);
     if (node.nodeName.toLowerCase() == 'iframe') {
         this.register_new_iframe(node, full_path);
+    }
+}
+
+MirrorDom.Broadcaster.prototype.rewrite_targets_in_dom_iterator = function(node, base_ipath, ipath) {
+    var node = jQuery(node);
+    //this.log("Node: " + MirrorDom.Util.describe_node(node[0]));
+    if (node.attr("target") == "_top") {
+        var iframe_name = this.iframe.name;
+        node.attr("target", iframe_name);
+        this.log("Rewrote a target attribute while iterating");
     }
 }
