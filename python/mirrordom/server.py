@@ -6,9 +6,14 @@ import lxml
 import lxml.etree
 import lxml.html
 import lxml.html.clean
-import lxml.html.html5parser
 
-#import json
+try:
+    import html5lib
+    import lxml.html.html5parser
+    HTML5LIB_INSTALLED = True
+except ImportError:
+    HTML5LIB_INSTALLED = False
+
 
 logger = logging.getLogger("mirrordom")
 
@@ -101,7 +106,7 @@ class Changelog(object):
 
 
         if since_change_id is None or since_change_id <= self.first_change_id:
-            logger.debug("returning init_html") 
+            logger.debug("returning init_html")
             return {
                 "init_html": self.init_html,
                 "diffs": [i for (change_id, s) in self.diffs for i in s], # flatten
@@ -146,7 +151,7 @@ def sanitise_diffs(diffs):
             # [1] Path [2] inner html [3] attrs [4] prop tree
             inner_html = d[2]
             d[2] = sanitise_innerhtml(inner_html, tag=d[3]["nodeName"])
-    return diffs            
+    return diffs
 
 def sanitise_innerhtml(innerhtml, tag="div"):
     # We'll need to wipe out the div tag at the end
@@ -158,6 +163,32 @@ def sanitise_innerhtml(innerhtml, tag="div"):
     final_html = (doc.text or '') + \
             ''.join([lxml.etree.tostring(c) for c in doc.iterchildren()])
     return final_html
+
+def force_insert_tbody(html_tree):
+    """
+    We want to force insert <tbody> elements between tables and trs to simulate
+    the automatic <tbody> insertion that most browsers do internally in their
+    DOM structure. It's probably not safe to assume that the innerHTML values
+    will always include the <tbody> insertion, so we'll just do it ourselves
+    here too.
+    """
+    tables = html_tree.iter('table')
+    for table in tables:
+        tbody = None
+        children = list(table)
+        for c in children:
+            if not isinstance(c.tag, basestring):
+                continue
+            elif c.tag.lower() == "colgroup":
+                continue
+            elif c.tag.lower() in ("tbody", "tfoot", "thead"):
+                tbody = None
+            else:
+                if tbody is None:
+                    tbody = lxml.html.Element('tbody')
+                    c.addprevious(tbody)
+                tbody.append(c)
+    return html_tree
 
 def sanitise_document(html, return_etree=False, use_html5lib=False):
     """
@@ -175,14 +206,22 @@ def sanitise_document(html, return_etree=False, use_html5lib=False):
                                 (i.e. it basically expects to parse an entire
                                 document)
     """
-    # This converts into a well formed html document 
-    if use_html5lib:
+    global HTML5LIB_INSTALLED
+    if use_html5lib and HTML5LIB_INSTALLED:
+        # HTML5Lib is a very good HTML soup parser, but sometimes it interferes
+        # with the DOM structure a bit too much.
         parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
         html_tree = lxml.html.html5parser.fromstring(html, parser=parser)
+
+        # Unfortunately, html5parser returns lxml.etree elements, but the
+        # cleaner only works with lxml.html elements. So the temporary quick
+        # fix is to dump the parsed document back to an XML string and
+        # re-parse.
         temp = lxml.html.tostring(html_tree)
         final_html_tree = lxml.html.fromstring(temp)
     else:
         final_html_tree = lxml.html.fromstring(html)
+        force_insert_tbody(final_html_tree)
 
     cleaner = _get_html_cleaner()
     cleaner(final_html_tree)

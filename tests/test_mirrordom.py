@@ -37,6 +37,7 @@ class TestServer(util.TestBase):
     UNSANITARY_HTML = """\
 <html>
   <head>
+    <!-- Random comment -->
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
     <link rel="StyleSheet" type="text/css" href="/trunkdevel/css/slidemenu.css?v=073c3303" />
@@ -95,6 +96,7 @@ class TestServer(util.TestBase):
 
 
     UNSANITARY_INNERHTML = """
+    <!-- Random comment -->
     hello world
     <div id="blah">
         <iframe src="http://removeme"> </iframe>
@@ -152,8 +154,7 @@ class TestServer(util.TestBase):
         to_html = self.SANITARY_INNERHTML2
         result_html = mirrordom.server.sanitise_innerhtml(from_html, tag="table")
         # html5parser mangles the input too much, disable it
-        assert self.compare_html(to_html, result_html, clean=False,
-                parse_with_html5parser=False)
+        assert self.compare_html(to_html, result_html, clean=False)
 
     UNSANITARY_INNERHTML3 = """<td style="background-color: blue;">SDF</td>"""
     SANITARY_INNERHTML3 = """<td style="background-color: blue;">SDF</td>"""
@@ -163,41 +164,100 @@ class TestServer(util.TestBase):
         to_html = self.SANITARY_INNERHTML3
         result_html = mirrordom.server.sanitise_innerhtml(from_html, tag="tr")
         # html5parser mangles the input too much, disable it
-        assert self.compare_html(to_html, result_html, clean=False,
-                parse_with_html5parser=False)
+        assert self.compare_html(to_html, result_html, clean=False)
 
-
-    UNSANITARY_INNERHTML4 = """
-    <html>
-      <body>
-        <table>
-          <form name="badform">
+    UNSANITARY_INNERHTML_TBODY = """
+    <table>
+        <colgroup span="1"></colgroup>
+        <!-- Random comment -->
+        <thead>
+          <tr><td>Header</td></tr>
+        </thead>
+        <tfoot>
+          <tr><td>Footer</td></tr>
+        </tfoot>
+        <tr><td>Blah1</td></tr>
+        <tbody>
             <tr><td>Blah2</td></tr>
-          </form>
-        </table>
-      </body>
-    </html>
+        </tbody>
+        <tr><td>Blah3</td></tr>
+        <tbody>
+          <tr><td>Blah4</td></tr>
+          <tr><td>Blah5</td></tr>
+        </tbody>
+        <tr><td>Blah6</td></tr>
+        <tr><td>Blah7</td></tr>
+    </table>
     """
 
-    SANITARY_INNERHTML4 = """
-    <html>
-      <body>
-        <table>
-          <form name="badform">
-            <tr><td>Blah2</td></tr>
-          </form>
-        </table>
-      </body>
-    </html>
+    SANITARY_INNERHTML_TBODY = """
+    <table>
+        <colgroup span="1"></colgroup>
+        <thead>
+          <tr><td>Header</td></tr>
+        </thead>
+        <tfoot>
+          <tr><td>Footer</td></tr>
+        </tfoot>
+        <tbody>
+          <tr><td>Blah1</td></tr>
+        </tbody>
+        <tbody>
+          <tr><td>Blah2</td></tr>
+        </tbody>
+        <tbody>
+          <tr><td>Blah3</td></tr>
+        </tbody>
+        <tbody>
+          <tr><td>Blah4</td></tr>
+          <tr><td>Blah5</td></tr>
+        </tbody>
+        <tbody>
+          <tr><td>Blah6</td></tr>
+          <tr><td>Blah7</td></tr>
+        </tbody>
+    </table>
     """
-    def test_sanitise_innerhtml4(self):
-        from_html = self.UNSANITARY_INNERHTML4
-        to_html = self.SANITARY_INNERHTML4
+
+    def test_sanitise_innerhtml_tbody(self):
+        """ Test 3: Strip tags from complex inner html """
+        from_html = self.UNSANITARY_INNERHTML_TBODY
+        to_html = self.SANITARY_INNERHTML_TBODY
         result_html = mirrordom.server.sanitise_document(from_html)
         # html5parser mangles the input too much, disable it
-        assert self.compare_html(to_html, result_html, clean=False,
-                parse_with_html5parser=False)
+        assert self.compare_html(to_html, result_html, clean=False)
 
+    UNSANITARY_INNERHTML_BAD_FORM_IN_TABLE = """
+    <html>
+      <body>
+        <table>
+          <form name="badform">
+            <tr><td>Blah2</td></tr>
+          </form>
+        </table>
+      </body>
+    </html>
+    """
+
+    SANITARY_INNERHTML_BAD_FORM_IN_TABLE = """
+    <html>
+      <body>
+        <table>
+          <tbody>
+          <form name="badform">
+            <tr><td>Blah2</td></tr>
+          </form>
+          </tbody>
+        </table>
+      </body>
+    </html>
+    """
+    def test_sanitise_innerhtml_bad_form_in_table(self):
+        from_html = self.UNSANITARY_INNERHTML_BAD_FORM_IN_TABLE
+        to_html = self.SANITARY_INNERHTML_BAD_FORM_IN_TABLE
+        result_html = mirrordom.server.sanitise_document(from_html)
+        # html5parser mangles the input too much, disable it
+        assert self.compare_html(to_html, result_html, clean=False)
 
 
 class TestFirefox(util.TestBrowserBase):
@@ -215,8 +275,7 @@ class TestFirefox(util.TestBrowserBase):
         #print "Viewer: %s" % (viewer_html)
 
         # html5parser mangles the input too much, disable it
-        return self.compare_html(broadcaster_html, viewer_html, clean=True,
-                parse_with_html5parser=False)
+        return self.compare_html(broadcaster_html, viewer_html, clean=True)
 
     def test_init_html(self):
         """

@@ -39,12 +39,21 @@ class TestFirefox(util.TestBrowserBase):
         # Right now, browser_html should be the raw inner html
         browser_html = self.webdriver.execute_script("return test_1_get_broadcaster_document()")
 
+        # Internet explorer values contain windows line endings
+        browser_html = browser_html.replace('\r\n', '\n')
+
         # Compare it to the actual HTML file
         html_path = util.get_html_path(self.HTML_CONTENT_FILE)
         actual_html = open(html_path, 'r').read()
 
-        assert self.compare_html(actual_html, browser_html)
+        # Semi hack: We expect all browsers to insert tbody, so we'll manually
+        # insert tbodies into our "expected" html too
+        import lxml.html
+        actual_tree = lxml.html.fromstring(actual_html)
+        util.force_insert_tbody(actual_tree)
 
+        #browser_tree = lxml.html.fromstring(browser_html)
+        assert self.compare_html(actual_tree, browser_html)
 
     # Note that I've deliberately omitted <tbody> from the table element, as I
     # want to see what sort of complications ensue
@@ -60,20 +69,22 @@ class TestFirefox(util.TestBrowserBase):
       <body>
         <h3>Hallow world!</h3>
         <div>
-        ohay
+          ohay
           <table id="thetable" style="border: 1px solid pink;">
-          <tr>
-            <th>1</th>
-            <th>2</th>
-          </tr>
-          <tr>
-            <td>a</td>
-            <td>b</td>
-          </tr>
-          <tr>
-            <td>c</td>
-            <td>d</td>
-          </tr>
+            <tbody>
+              <tr>
+                <th>1</th>
+                <th>2</th>
+              </tr>
+              <tr>
+                <td>a</td>
+                <td>b</td>
+              </tr>
+              <tr>
+                <td>c</td>
+                <td>d</td>
+              </tr>
+            </tbody>
           </table>
         </div>
         <div>
@@ -89,6 +100,8 @@ class TestFirefox(util.TestBrowserBase):
         desired_html = self.TEST_APPLY_DOCUMENT
         self.webdriver.execute_script("test_2_apply_document(arguments[0])", desired_html)
         viewer_html = self.webdriver.execute_script("return get_viewer_html()")
+        # Internet explorer values contain windows line endings
+        viewer_html = viewer_html.replace('\r\n', '\n')
         assert self.compare_html(desired_html, viewer_html, clean=True)
 
     def test_get_diff_add_node(self):

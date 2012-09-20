@@ -1,7 +1,6 @@
 import os
 import urllib
 import urlparse
-import html5lib
 import SimpleHTTPServer
 import SocketServer
 import threading
@@ -12,26 +11,6 @@ import lxml
 import lxml.doctestcompare
 import lxml.html
 import lxml.html.clean
-#import lxml.html.soupparser
-import lxml.html.html5parser
-
-# SO EVIL HACK: We replace an import of "lxml.etree as etree" in
-# html5.treebuilders.etree_lxml. 
-#
-# The end result is that lxml.html.html5parser returns lxml.html elements
-# instead of lxml.etree elements, which are basically the same thing but with
-# additional html specific features tacked on, and these can also be with the
-# lxml.html.clean functionality.
-#
-# Otherwise if we don't do this hack, we'll have to convert from lxml.etree elements
-# to lxml.html elements by dumping the document out into a string and then
-# parsing it again with lxml.html.
-
-USE_EVIL_HTML5LIB_LXML_HTML_HACK = False
-if USE_EVIL_HTML5LIB_LXML_HTML_HACK:
-    html5lib.treebuilders.etree_lxml.etree = lxml.html
-    lxml.html.Comment = lxml.html.HtmlComment
-
 import lxml.etree
 from selenium import webdriver
 
@@ -179,49 +158,42 @@ def get_debug_ie_webdriver():
 
 def get_debug_chrome_webdriver():
     print "Starting chrome webdriver"
+    # Note: chromedriver.log appears in the current directory and there's no
+    # way to change this.
     return webdriver.Chrome()
 
 # -----------------------------------------------------------------------------
-# XML hacks
-# -----------------------------------------------------------------------------
+# HTML parsing fixes
 
-# LHTMLOutputChecker hack: Force the comparator use the html5lib parser
-# instead of the lxml.html parser (is this still needed? not sure)
+class LHTMLOutputChecker(lxml.doctestcompare.LHTMLOutputChecker):
+    """ The standard LHTML output checker doesn't use the lxml.html.fromstring
+    parser """
 
-def parse_html_string(s):
-    """ LHTMLOutputChecker hack part 1 """
-    parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
-    return lxml.html.html5parser.fromstring(s, parser=parser)
-
-class LHTML5OutputChecker(lxml.doctestcompare.LHTMLOutputChecker):
     def get_parser(self, want, got, optionflags):
-        """ LHTMLOutputChecker hack part 2 """
-        return parse_html_string
+        """ LHTMLOutputChecker """
+        return lxml.html.fromstring
 
-# SO EVIL HACK part 2: Fallback behaviour if we have to stop using the hack
-# (set USE_EVIL_HTML5LIB_LXML_HTML_HACK to False at the top of this module)
-
-def convert_to_lxml_html(doc):
+def force_insert_tbody(html_tree):
     """
-    As a result of calling lxml.html.html5parser.fromstring, we have
-    lxml.etree._Element instances. We want lxml.html.Element instances. The
-    only way to do this is to dump to string and re-parse with
-    lxml.html.fromstring!
-
-    Note: If USE_EVIL_HTML5LIB_LXML_HTML_HACK is True, then we'll probably
-    already have lxml.html.Element instances and this function won't do
-    anything.
+    Force insert tbody elements between tables and trs
     """
-    if isinstance(doc, lxml.html.HtmlElement):
-        #print "Already html element!"
-        return doc
-    else:
-        #print "Converting document to lxml.html elements! (%s)" % (doc.__class__)
-        pass
-
-    result = lxml.html.fromstring(lxml.html.tostring(doc))
-    #print "returning %s" % (result.__class__)
-    return result
+    tables = html_tree.iter('table')
+    for table in tables:
+        tbody = None
+        children = list(table)
+        for c in children:
+            if not isinstance(c.tag, basestring):
+                continue
+            elif c.tag.lower() == "colgroup":
+                continue
+            elif c.tag.lower() == "tbody":
+                tbody = None
+            else:
+                if tbody is None:
+                    tbody = lxml.html.Element('tbody')
+                    c.addprevious(tbody)
+                tbody.append(c)
+    return html_tree
 
 # -----------------------------------------------------------------------------
 
@@ -302,13 +274,12 @@ class TestBase(object):
             should_strip_localhost_hrefs_for_ie=True,
             should_remove_title_for_ie=True,
             strip_style_attributes=True,
-            parse_with_html5parser=True,
             clean=False):
         """
         Yep, compare two target documents together
 
-        :param want:    The "template" HTML we're matching against
-        :param got:     The output HTML we got from our test
+        :param want:    The "template" HTML we're matching against (either a string or a etree document)
+        :param got:     The output HTML we got from our test (string or etree)
         :param should_augment_defaults_for_ie:
                         Force default attributes onto various nodes to
                         compensate for IE removing attributes at whim
@@ -333,28 +304,13 @@ class TestBase(object):
         :param strip_style_attributes:
                         IE's style attributes are unworkable for comparison
 
-        :param parse_with_html5parser:
-                        Use the highly tolerant HTML parsing which corrects for
-                        unexpected structures.
-
         :param clean:   Try to perform some extra cleaning using the lxml html
                         Cleaner class to make the comparison less brittle.
         """
-        if parse_with_html5parser:
-            want_doc = parse_html_string(want)
-            got_doc = parse_html_string(got)
+        want_doc = lxml.html.fromstring(want) if isinstance(want, basestring) else want
+        got_doc = lxml.html.fromstring(got) if isinstance(got, basestring) else got
 
-            # Convert lxml.etree._Element tree to lxml.html.HtmlElement tree as we
-            # want to use a bunch of lxml.html functionality.
-            want_doc = convert_to_lxml_html(want_doc)
-            got_doc = convert_to_lxml_html(got_doc)
-
-            # Use hacked compare checker
-            compare = LHTML5OutputChecker()
-        else:
-            want_doc = lxml.html.fromstring(want)
-            got_doc = lxml.html.fromstring(got)
-            compare = lxml.doctestcompare.LHTMLOutputChecker()
+        compare = LHTMLOutputChecker()
 
         if should_augment_defaults_for_ie:
             augment_tree_defaults_for_ie(want_doc)
@@ -373,23 +329,13 @@ class TestBase(object):
             lxml.etree.strip_attributes(got_doc, "style")
 
         if clean:
-            # Oh man...as a result of html5parser.fromstring, we have
-            # lxml.etree._Element instances. We want lxml.html.ELement instances.
-            # Dump to string and re-parse!
-            #
-            # Note: html5lib.fromstring performs crucial operations such as
-            # injecting <tbody>s between <tables> and <trs>, hence this
-            # "useless" operation.
             cleaner = self.get_html_cleaner()
-            #want_doc = convert_to_lxml_html(want_doc)
-            #got_doc = convert_to_lxml_html(got_doc)
             cleaner(want_doc)
             cleaner(got_doc)
 
         result = compare.compare_docs(want_doc, got_doc)
 
         if not result:
-        #if True:
             got_doc_string = lxml.html.tostring(got_doc)
             want_doc_string = lxml.html.tostring(want_doc)
             print compare.output_difference(Example("", want_doc_string),
@@ -425,8 +371,6 @@ class TestBrowserBase(TestBase):
 
     @classmethod
     def _kill_webdriver(cls):
-        #raise Exception("Must override this method")
-
         if cls._webdriver:
             if os.environ.get("KEEP_WEBDRIVER_ALIVE") == "1":
                 print "Keeping webdriver %s alive!" % (cls._webdriver)

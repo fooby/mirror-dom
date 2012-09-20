@@ -71,9 +71,9 @@ MirrorDom.Util.get_document_object_from_iframe = function(iframe) {
  * Checks whether we should ignore the node when building the tree
  */
 MirrorDom.Util.should_ignore_node = function(node) {
-    if (node == undefined) {
+    /*if (node == undefined) {
         debugger;
-    }
+    }*/
 
     switch (node.nodeType) {
         case 3: // case Node.TEXT_NODE:
