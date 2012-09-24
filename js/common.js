@@ -1,11 +1,5 @@
 var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
-//MirrorDom.Base.prototype.get_document_element = function() {
-//    var d = this.get_document_object();
-//    var doc_elem = d.documentElement;
-//    return doc_elem;
-//}
-
 MirrorDom.Util = {}
 
 
@@ -71,10 +65,6 @@ MirrorDom.Util.get_document_object_from_iframe = function(iframe) {
  * Checks whether we should ignore the node when building the tree
  */
 MirrorDom.Util.should_ignore_node = function(node) {
-    /*if (node == undefined) {
-        debugger;
-    }*/
-
     switch (node.nodeType) {
         case 3: // case Node.TEXT_NODE:
             // Ignore if text node is only whitespace
@@ -96,17 +86,6 @@ MirrorDom.Util.should_ignore_node = function(node) {
 
     // Ignore everything else
     return true;
-}
-
-
-/**
- * For ignoring text nodes, we need to have a bit of a peek at the previous
- * node to see whether we're in a consecutive text node
- *
- * Works like apply_ignore_nodes in reverse, but without text node
- * considerations
- */
-MirrorDom.Util.peek_next_node = function(node) {
 }
 
 /**
@@ -218,18 +197,44 @@ MirrorDom.Util.get_property = function(node, prop_lookup) {
     return [true, prop];
 }
 
-
 /**
- * Retrieve list of properties from DOM node
+ * ============================================================================
+ * Errors
+ * ============================================================================
  */
-MirrorDom.Util.get_all_properties = function(node, prop_lookup_lost) {
+MirrorDom.Util.PathError = function(root, path) {
+    this.name = "PathError";
+    this.root = root;
+    this.path = path;
+    this.message = "Couldn't retrieve path " + path.join(",") +
+        " for node " + MirrorDom.Util.describe_node(root);
 }
+//MirrorDom.Util.PathError.prototype = new Error();
+//MirrorDom.Util.PathError.prototype.constructor = MirrorDom.Util.PathError;
+
+MirrorDom.Util.PathError.prototype.describe_path = function() {
+    return MirrorDom.Util.describe_node_at_path(this.root, this.path);
+}
+
+MirrorDom.Util.DiffError = function(diff, root, path) {
+    this.name = "PathError";
+    this.diff = diff;
+    this.root = root;
+    this.path = path;
+    this.message = "Couldn't apply diff [" + diff.join(",") +
+        "] for node " + MirrorDom.Util.describe_node(root) + ", path " +
+        path.join(",");
+}
+
+MirrorDom.Util.DiffError.prototype.describe_path = function() {
+    return MirrorDom.Util.describe_node_at_path(this.root, this.path);
+}
+
 /**
  * ============================================================================
  * Path Utilities
  * ============================================================================
  */
-
 MirrorDom.Util.get_properties = function(node) {
     if (node.nodeType == 1) {
         // Let's go check the node
@@ -283,8 +288,14 @@ MirrorDom.Util.node_at_path = function(root, ipath) {
     var node = root;
     for (var i=0; i < ipath.length; i++) {
         node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
+        if (node == null) {
+            throw new MirrorDom.Util.PathError(root, ipath);
+        }
         for (var j=0; j < ipath[i]; j++) {
             node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+            if (node == null) {
+                throw new MirrorDom.Util.PathError(root, ipath);
+            }
         }
     }
     return node;

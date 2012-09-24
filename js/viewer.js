@@ -4,16 +4,27 @@
 
 var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
+MirrorDom.RECEIVING_OK = 1;
+MirrorDom.RECEIVING_BAD = 2;
+
+
+/**
+ * Constructor. See init_options for option processing
+ */
 MirrorDom.Viewer = function(options) {
     this.receiving = false;
+
+
+    // We can be in a good state or a bad state. When in a good state,
+    // everything is normal and we apply any page changes received.
+    //
+    // If we get desynchronised (i.e. we start receiving changes for elements
+    // that don't exist), we go into a contingency mode where we don't apply
+    // any further changes until the broadcaster visits a new page which gives us a
+    // chance to start afresh.
+    this.error_status = MirrorDom.RECEIVING_OK;
     this.interval_event = null;
     this.iframe = null;
-
-    // Keep a reference to all frames. Possible keys are:
-    //
-    //      m: Main viewer frame
-    //      <comma separated node path>,i: Iframe
-    this.frames = {}
     
     // Misc
     this.debug = false;
@@ -68,7 +79,21 @@ MirrorDom.Viewer.prototype.poll = function() {
     if (this.next_change_id != null) {
         params["change_id"] = this.next_change_id;
     }
-    this.log("Polling with change " + params["change_id"]);
+
+    // Inform the server we only want an update if it contains a main frame
+    // init_html (this basically means we wait until the broadcaster visits a
+    // new page)
+    if (this.error_status == MirrorDom.RECEIVING_BAD) {
+        // Note: this is extremely hacky, given that the "true" value gets run
+        // through JSON on the other end.
+        // TODO: Don't be hacky
+        params["init_html_required"] = "true";
+        this.log("Polling with change " + params["change_id"] + ", using error recovery mode");
+    }
+    else {
+        this.log("Polling with change " + params["change_id"]);
+    }
+
     this.puller.pull("get_update", params, 
         function(result) {
             self.receive_updates(result);
@@ -79,11 +104,38 @@ MirrorDom.Viewer.prototype.poll = function() {
 
 
 MirrorDom.Viewer.prototype.receive_updates = function(result) {
+    if (result["changesets"] == undefined) {
+        this.log("No changeset returned (this should only happen in error recovery mode)");
+        return;
+    }
+
     this.apply_all_changesets(result["changesets"]);
     this.next_change_id = result["last_change_id"] + 1;
 }
 
+
+/**
+ * Wrapper for perform_apply_all_changesets, so that we can have error handling.
+ */
 MirrorDom.Viewer.prototype.apply_all_changesets = function(changesets, resume_pos) {
+    try {
+        this.perform_apply_all_changesets(changesets, resume_pos);
+    } catch (e) {
+        if (e instanceof MirrorDom.Util.PathError || e instanceof MirrorDom.Util.DiffError) {
+            if (this.debug) {
+                this.log(e.message);
+                this.log("Path analysis: " + e.describe_path());
+            }
+            this.error_status = MirrorDom.RECEIVING_BAD;
+            return;
+        }
+        else {
+            throw(e);
+        }
+    }
+}
+
+MirrorDom.Viewer.prototype.perform_apply_all_changesets = function(changesets, resume_pos) {
     // We have a list of changelogs for each iframe in our document.
     // The changelogs are ordered top to bottom, since the higher up frames
     // need to create the lower frames first, before those frame documents can
@@ -113,8 +165,6 @@ MirrorDom.Viewer.prototype.apply_all_changesets = function(changesets, resume_po
     // which point we terminate the current loop and resume once the event has
     // fired.
     for (var i = resume_pos ? resume_pos : 0; i < changesets.length; i++) {
-        //debugger;
-
         var frame_path = changesets[i][0];
         var changes = changesets[i][1];
         if (!("diffs" in changes || "init_html" in changes)) {
@@ -166,6 +216,9 @@ MirrorDom.Viewer.prototype.apply_all_changesets = function(changesets, resume_po
 
 MirrorDom.Viewer.prototype.apply_changeset = function(doc_elem, changelog) {
     if (changelog.init_html) {
+        // init_html means a clean slate, so we're no longer concerned about
+        // any previous diff errors encountered.
+        this.error_status = MirrorDom.RECEIVING_OK;
         this.log(changelog.last_change_id + ": Got new html!");
         this.apply_document(doc_elem, changelog.init_html);
     }
@@ -345,8 +398,13 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
             // Go to node referenced in offset and replace it 
             // if it exists; and delete all following nodes
             for (var d=0; d < diff[1][diff[1].length-1]; d++) {
-                node = node.nextSibling;
-                node = MirrorDom.Util.apply_ignore_nodes(node);
+
+                if (node == null) {
+                    // Path is invalid, throw error
+                    throw new MirrorDom.Util.DiffError(diff, root, diff[1]);
+                }
+
+                node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
             }
 
             // Wipe everything out, as we're assuming the diff contains a

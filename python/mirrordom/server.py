@@ -150,6 +150,12 @@ def sanitise_diffs(diffs):
         if type == "node":
             # [1] Path [2] inner html [3] attrs [4] prop tree
             inner_html = d[2]
+
+            # Temporary workaround to prevent SVG elements causing errors (they
+            # don't have innerHTML)
+            if inner_html is None:
+                continue
+
             d[2] = sanitise_innerhtml(inner_html, tag=d[3]["nodeName"])
     return diffs
 
@@ -279,10 +285,10 @@ def handle_send_new_instance(storage, frame_id, html, props, url=None, iframes=N
     """
     Handles a new page loading or starting a new session
 
-    @param html         HTML dump (unsanitised)
-    @param props        List of property diffs
-    @param url          URL of the new page
-    @param iframes      Paths to child iframes
+    :@param html:        HTML dump (unsanitised)
+    :@param props:       List of property diffs
+    :@param url:         URL of the new page
+    :@param iframes:     Paths to child iframes
     """
     html = sanitise_document(html)
     storage.init_html(frame_id, html, props)
@@ -293,10 +299,10 @@ def handle_send_new_page(storage, frame_id, html, props, url, iframes):
     """
     Handles a new page loading or starting a new session
 
-    @param html         HTML dump (unsanitised)
-    @param props        List of property diffs
-    @param url          URL of the new page
-    @param iframes      Paths to child iframes
+    :param html:        HTML dump (unsanitised)
+    :param props:       List of property diffs
+    :param url:         URL of the new page
+    :param iframes:     Paths to child iframes
     """
     html = sanitise_document(html)
     storage.init_html(frame_id, html, props)
@@ -317,9 +323,28 @@ def handle_send_diffs(storage, frame_id, diffs):
         logger.warn("Couldn't find frame %s" % (frame_id))
     return storage.last_change_id
 
-def handle_get_update(storage, change_id=None):
+def handle_get_update(storage, change_id=None, init_html_required=False):
+    """
+    :param init_html_required:      Only return a response if the main frame
+                                    has been loaded with a new page
+    """
     if change_id:
         change_id = int(change_id)
+
+    # Viewer is in error recovery mode - don't send any new changes unless
+    # the main frame has been refreshed.
+    if init_html_required:
+        has_init_html = False
+        try:
+            main_changeset = storage.changelogs[('m',)]
+        except KeyError:
+            pass
+        else:
+            if main_changeset.first_change_id >= change_id:
+                has_init_html = True
+        if not has_init_html:
+            return {"last_change_id": storage.last_change_id}
+
     changesets = [(frame_path, c.diffs_since_change_id(change_id)) \
             for frame_path, c in storage.changelogs.iteritems()]
 
