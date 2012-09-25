@@ -42,8 +42,13 @@ MirrorDom.Viewer.prototype.init_options = function(options) {
 
     this.iframe = options.iframe;
     this.poll_interval = options.poll_interval != null ? options.poll_interval : 1000;
+    // about:blank doesn't work properly in some browsers, so you really do
+    // have to provide an actual blank page url.
     this.blank_page = options["blank_page"] != null ? options["blank_page"] : "about:blank";
     this.debug = options.debug;
+
+    // Event handlers
+    this.on_page_load = options.on_page_load;
 };
 
 // ----------------------------------------------------------------------------
@@ -184,14 +189,12 @@ MirrorDom.Viewer.prototype.perform_apply_all_changesets = function(changesets, r
             iframe.src = this.blank_page;
             var callback = make_reentry_callback(i);
             jQuery(iframe).load(callback);
-
+            return;
         } else if (iframe_doc.readyState == 'loading') {
             // Scenario 1: Newly created iframe
             this.log("Waiting for iframe to finish loading: " + i + " on frame " + frame_path.join(","));
             var callback = make_reentry_callback(i);
             jQuery(iframe).load(callback);
-            //jQuery(iframe_doc).ready(callback);
-            //window.setTimeout(callback, 20);
             return;
         } else if ("init_html" in changes && !has_loaded) {
             // Scenario 2: IFrame exists, but we have init_html and want to
@@ -202,9 +205,14 @@ MirrorDom.Viewer.prototype.perform_apply_all_changesets = function(changesets, r
             iframe.src = this.blank_page;
             var callback = make_reentry_callback(i);
             jQuery(iframe).load(callback);
-            //window.setTimeout(callback, 20);
             return;
         } else {
+
+            // The url element is only supplied whenever init_html is supplied
+            if ("url" in changes && MirrorDom.Util.is_main_upath(frame_path)) {
+                this.fire_event("on_page_load", {"url": changes["url"]});
+            }
+
             // Scenario 3: Have diffs, let's proceed
             this.apply_changeset(iframe_doc.documentElement, changes);
 
@@ -470,6 +478,16 @@ MirrorDom.Viewer.prototype.delete_node_and_remaining_siblings = function(node) {
         var next_node = node.nextSibling;
         parent.removeChild(node);
         node = next_node;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Event handling
+// ----------------------------------------------------------------------------
+
+MirrorDom.Viewer.prototype.fire_event = function(event, data) {
+    if (this[event] != undefined) {
+        this[event](data);
     }
 }
 

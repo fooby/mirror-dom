@@ -58,9 +58,6 @@ MirrorDom.Broadcaster = function(options, parent_details) {
 
     // Initialise options
     this.init_options(options);
-    //
-    // TODO: Do we still need this
-    this.name = null;
 }
 
 /**
@@ -79,6 +76,7 @@ MirrorDom.Broadcaster = function(options, parent_details) {
  *                  Warning: Won't work for cross domain iframes.
  */
 MirrorDom.Broadcaster.prototype.init_options = function(options) {
+    // Transport mechanism
     if (options.pusher) {
         this.pusher = options.pusher;
     } else if (options.root_url) {
@@ -87,11 +85,17 @@ MirrorDom.Broadcaster.prototype.init_options = function(options) {
         this.pusher = null;
     }
 
+    // Set the poll interval
     this.poll_interval = options.poll_interval != null ? options.poll_interval : 1000;
-    if (options.iframe) {
-        this.iframe = options.iframe;
-    }
+
+    // Iframe MUST exist
+    this.iframe = options.iframe;
+
+    // Debug log messages
     this.debug = options.debug ? true : false;
+
+    // Callbacks
+    this.on_page_load = options.on_page_load;
 };
 
 
@@ -227,7 +231,7 @@ MirrorDom.Broadcaster.prototype.start_full_document = function() {
     // Clone the DOM
     this.make_dom_clone();
     var html = this.get_document_data(doc_elem);
-    var src = jQuery(this.iframe).attr('src');
+    var url = this.iframe.contentWindow.location.href;
 
     var iframe_paths = [];
     for (var i = 0; i < this.child_iframes.length; i++) {
@@ -241,7 +245,7 @@ MirrorDom.Broadcaster.prototype.start_full_document = function() {
     var data = {
         "html":  html,
         "props": prop_diffs,
-        "url":   src,
+        "url":   url,
         "iframes": iframe_paths
     }
 
@@ -273,6 +277,7 @@ MirrorDom.Broadcaster.prototype.make_dom_clone = function(doc_elem) {
 MirrorDom.Broadcaster.prototype.handle_load_page = function() {
     this.log("Loaded new page at " + this.get_frame_path().join(",") + " !" );
     this.was_new_page_loaded = true;
+    this.fire_event("on_page_load", {url: this.iframe.contentWindow.location.href});
     this.rewrite_link_targets();
 }
 
@@ -286,6 +291,17 @@ MirrorDom.Broadcaster.prototype.rewrite_link_targets = function() {
     links_forms.attr("target", iframe_name);
     this.log("Rewrote " + links_forms.length + " link/form targets to \"" + iframe_name + "\"");
 }
+
+// ----------------------------------------------------------------------------
+// Event handling
+// ----------------------------------------------------------------------------
+MirrorDom.Broadcaster.prototype.fire_event = function(event, data) {
+    if (this[event] != undefined) {
+        this[event](data);
+    }
+}
+
+
 
 // ----------------------------------------------------------------------------
 // Internal utility functions

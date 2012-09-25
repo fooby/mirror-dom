@@ -468,6 +468,10 @@ MirrorDom.Util.describe_node_at_upath = function(root, upath) {
     return path_desc.join("\n");
 }
 
+MirrorDom.Util.is_main_upath = function(upath) {
+    return (upath.length == 1 && upath[0] == 'm');
+}
+
 
 /* JQuery-XHR implementation of server push - we just POST all the data to
  * root_url + the method name */

@@ -38,9 +38,9 @@ class Session(object):
         x = self.last_change_id
         return x
 
-    def init_html(self, frame_id, html, props):
+    def init_html(self, frame_id, html, props, url=None):
         next_id = self.get_next_change_id()
-        c = Changelog(html, next_id)
+        c = Changelog(html, next_id, url)
         c.add_diff_set(next_id, props)
         self.changelogs[frame_id] = c
 
@@ -74,10 +74,11 @@ class Session(object):
 
 
 class Changelog(object):
-    def __init__(self, init_html, first_change_id):
+    def __init__(self, init_html, first_change_id, url=None):
         self.init_html = init_html
         self.diffs = []
         self.first_change_id = first_change_id
+        self.url = url
 
     def add_diff_set(self, next_id, diff):
         """
@@ -109,6 +110,7 @@ class Changelog(object):
             logger.debug("returning init_html")
             return {
                 "init_html": self.init_html,
+                "url": self.url,
                 "diffs": [i for (change_id, s) in self.diffs for i in s], # flatten
                 "last_change_id": self.last_change_id,
             }
@@ -291,7 +293,7 @@ def handle_send_new_instance(storage, frame_id, html, props, url=None, iframes=N
     :@param iframes:     Paths to child iframes
     """
     html = sanitise_document(html)
-    storage.init_html(frame_id, html, props)
+    storage.init_html(frame_id, html, props, url=url)
     storage.remove_frame_children(frame_id)
     #storage.add_frames(iframes)
 
@@ -305,7 +307,7 @@ def handle_send_new_page(storage, frame_id, html, props, url, iframes):
     :param iframes:     Paths to child iframes
     """
     html = sanitise_document(html)
-    storage.init_html(frame_id, html, props)
+    storage.init_html(frame_id, html, props, url=url)
     storage.remove_frame_children(frame_id)
 
 def handle_send_diffs(storage, frame_id, diffs):
