@@ -35,7 +35,6 @@
 
       function test_1_get_broadcaster_document() {
           var data = broadcaster.start_full_document();
-          //return JSON.stringify(data["html"]);
           return JSON.stringify(data["html"]);
       }
 
@@ -54,12 +53,12 @@
 
       function test_2_get_broadcaster_diff() {
           var diff = broadcaster.get_diff();
-          // Can't rely on selenium's JSON handling
+          // Can't rely on selenium's JSON handling, I tried
           return JSON.stringify(diff);
       }
 
       function test_2_apply_viewer_diff(diff) {
-          //debugger;
+          var diff = JSON.parse(diff);
           return viewer.apply_diffs(null, diff);
       }
 
@@ -71,8 +70,7 @@
 
       function test_3_get_broadcaster_all_property_diffs() {
           var data = broadcaster.start_full_document();
-          //return JSON.stringify(data["props"]);
-          return data["props"];
+          return JSON.stringify(data["props"]);
       }
 
       // Test 5: Test apply diff of inserted element (i.e. not at end of body)

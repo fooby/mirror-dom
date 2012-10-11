@@ -148,29 +148,27 @@ def _get_html_cleaner():
 def sanitise_diffs(diffs):
     # For now, we'll just sanitise in place
     for d in diffs:
-        type = d[0]
-        if type == "node":
-            # [1] Path [2] inner html [3] attrs [4] prop tree
-            inner_html = d[2]
-
-            # Temporary workaround to prevent SVG elements causing errors (they
-            # don't have innerHTML)
-            if inner_html is None:
-                continue
-
-            d[2] = sanitise_innerhtml(inner_html, tag=d[3]["nodeName"])
+        diff_type = d[0]
+        if diff_type == "node":
+            sanitise_node_diff(d)
     return diffs
 
-def sanitise_innerhtml(innerhtml, tag="div"):
-    # We'll need to wipe out the div tag at the end
-    outerhtml = '<' + tag + '>' + innerhtml + '</' + tag + '>'
-    doc = sanitise_document(outerhtml, return_etree=True, use_html5lib=False)
+def sanitise_node_diff(diff):
+    """
+    Sanitise the node HTML (note: diffs now contain the node's outerHTML, not
+    innerHTML as in earlier versions).
+    """
+    # [1] Path [2] inner html [3] attrs [4] prop tree
 
-    # Ripped from
-    # http://stackoverflow.com/questions/6123351/equivalent-to-innerhtml-when-using-lxml-html-to-parse-html
-    final_html = (doc.text or '') + \
-            ''.join([lxml.etree.tostring(c) for c in doc.iterchildren()])
-    return final_html
+    # Temporary workaround to prevent SVG elements causing errors (they
+    # don't have innerHTML). TODO: FIX
+    if diff[2] is None:
+        return
+    diff[2] = sanitise_html_fragment(diff[2])
+
+def sanitise_html_fragment(html):
+    doc = sanitise_document(html, return_etree=True, use_html5lib=False)
+    return lxml.etree.tostring(doc)
 
 def force_insert_tbody(html_tree):
     """

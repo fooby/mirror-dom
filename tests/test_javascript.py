@@ -112,15 +112,20 @@ class TestFirefox(util.TestBrowserBase):
         result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
         print result
 
-        # Expected result should be similar to:
-        # [[u'node', [1, 5], u'Hello Dog', {u'attributes': {}, u'nodeType': 1,
-        #   u'nodeName': u'DIV', u'nodeValue': None}, [[u'props', [],
-        #   {u'style.cssText': u'background-color: blue;'}, None]]]]
-        #
-        # I don't really want to hardcode an exact result comparison at this
-        # point in time
+        # Expected result should be identical to:
+        # [[u'node', [1,5], u'<div title="title goes here" onclick="alert('hi')">Hello everybody</div>',
+        #       [[u'props', [], {u'style.cssText': u'background-color: blue;'}, None]]]]
+
+        EXPECTED_NODE_HTML = """<div title="title goes here" onclick="alert('hi')">Hello everybody</div>"""
+
         assert len(result) == 1
-        props = result[0][4]
+        html = result[0][2]
+        props = result[0][3]
+
+        # Warning: innerHTML works different between different browsers
+        # (i.e. IE will mangle innerHTML with dynamic property updates we can't
+        # do a direct string comparison)
+        assert self.compare_html(EXPECTED_NODE_HTML, html, clean=True)
 
         # test_3_modify_broadcaster_document_with_add_node adds
         # background-color style which should reflect in the node properties
@@ -135,11 +140,9 @@ class TestFirefox(util.TestBrowserBase):
     def test_apply_add_node_diff(self):
         """ Test 4: Apply a simple add node diff """
         self.init_webdriver()
-        diff = [[u'node', [1, 4], u'Hello There', {u'attributes': {u'style':
-            u'background-color: red;'}, u'nodeType': 1, u'nodeName': u'DIV',
-            u'nodeValue': None}, []]]
+        diff = [[u'node', [1, 4], u'<div style="background-color: red">Hello There</div>', []]]
         self.webdriver.execute_script("test_4_setup_viewer_document()")
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
     def test_get_initial_property_diff(self):
         """ Test 5: Retrieve initial property diff """
@@ -226,7 +229,7 @@ class TestFirefox(util.TestBrowserBase):
 
         # Ok, change the property
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -236,7 +239,7 @@ class TestFirefox(util.TestBrowserBase):
         assert input_value == new_value
 
     def test_apply_attribute_diff(self):
-        """ Test 11: Apply a property diff """
+        """ Test 11: Apply an attribute diff """
         self.init_webdriver()
         new_value = "4"
         # Assuming that the <table id="thetable">  element is at position
@@ -254,7 +257,7 @@ class TestFirefox(util.TestBrowserBase):
 
         # Ok, change the attrib
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -282,7 +285,7 @@ class TestFirefox(util.TestBrowserBase):
         assert div != None
 
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
         # Shouldn't be there now
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -322,7 +325,7 @@ class TestFirefox(util.TestBrowserBase):
         self.webdriver.switch_to_default_content()
         diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
         print "Diff: %s" % (diff)
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')

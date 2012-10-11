@@ -14,7 +14,6 @@ MirrorDom.RECEIVING_BAD = 2;
 MirrorDom.Viewer = function(options) {
     this.receiving = false;
 
-
     // We can be in a good state or a bad state. When in a good state,
     // everything is normal and we apply any page changes received.
     //
@@ -23,49 +22,62 @@ MirrorDom.Viewer = function(options) {
     // any further changes until the broadcaster visits a new page which gives us a
     // chance to start afresh.
     this.error_status = MirrorDom.RECEIVING_OK;
-    this.interval_event = null;
     this.iframe = null;
+    this.event_listeners = {};
     
     // Misc
     this.debug = false;
-
     this.next_change_id = null;
+
+    // Invoke the remote procedure call
     this.init_options(options);
 }
 
 MirrorDom.Viewer.prototype.init_options = function(options) {
-    if (options.puller) {
-        this.puller = options.puller;
+    // Setup custom RPC transport mechanism (the data passed needs to
+    // eventually get to the python server)
+    if (options.pull_method) {
+        this.pull_method = options.pull_method;
     } else {
-        this.puller = new MirrorDom.JQueryXHRPuller(options.root_url);
+        var puller = new MirrorDom.JQueryXHRPuller(options.root_url);
+        this.pull_method = jQuery.proxy(puller, "pull");
     }
 
     this.iframe = options.iframe;
-    this.poll_interval = options.poll_interval != null ? options.poll_interval : 1000;
     // about:blank doesn't work properly in some browsers, so you really do
     // have to provide an actual blank page url.
     this.blank_page = options["blank_page"] != null ? options["blank_page"] : "about:blank";
     this.debug = options.debug;
-
-    // Event handlers
-    this.on_page_load = options.on_page_load;
 };
 
 // ----------------------------------------------------------------------------
 // Public functions
 // ----------------------------------------------------------------------------
 
-MirrorDom.Viewer.prototype.start = function(container_id) {
-    var self = this;
-    self.poll();
-    this.interval_event = window.setInterval(function() {
-        self.poll();
-    }, this.poll_interval);
-};
+/**
+ * Perform a single iteration of mirrordom logic.
+ *
+ * This function should be called at regular intervals to get semi-responsive
+ * browser synchronisation. 
+ */
+MirrorDom.Viewer.prototype.go = function() {
+    this.poll();
+}
 
 // ----------------------------------------------------------------------------
 // Internal logic
 // ----------------------------------------------------------------------------
+
+/**
+ * This is the start of main logic flow. Called at regular intervals.
+ *
+ * The effect is to invoke the "puller.pull()" method, with data and a
+ * callback. The puller needs to move the data to the Python server via some
+ * RPC mechanism, grab the response and then pass that to the callback.
+ *
+ * In this case, the callback is "receive_updates" which is where the real
+ * work begins.
+ */
 MirrorDom.Viewer.prototype.poll = function() {
     var d = this.get_document_object();
     if (d.readyState != "complete") {
@@ -99,39 +111,51 @@ MirrorDom.Viewer.prototype.poll = function() {
         this.log("Polling with change " + params["change_id"]);
     }
 
-    this.puller.pull("get_update", params, 
+    // Invoke the remote procedure call
+    this.pull_method("get_update", params, 
         function(result) {
-            self.receive_updates(result);
+            if (result) {
+                self.receive_updates(result);
+            }
             self.receiving = false;
         }
     );
 }
 
-
+/**
+ * Callback which expects the response from the python mirrordom server.
+ *
+ * @param result        The response the python server from whatever method was
+ *                      invoked from the .poll() method.
+ */
 MirrorDom.Viewer.prototype.receive_updates = function(result) {
     if (result["changesets"] == undefined) {
         this.log("No changeset returned (this should only happen in error recovery mode)");
         return;
     }
 
-    this.apply_all_changesets(result["changesets"]);
-    this.next_change_id = result["last_change_id"] + 1;
+    if (result["changesets"].length > 0) {
+        this.apply_all_changesets(result["changesets"]);
+        this.next_change_id = result["last_change_id"] + 1;
+    }
 }
 
 
 /**
- * Wrapper for perform_apply_all_changesets, so that we can have error handling.
+ * Wraps perform_apply_all_changesets in a try/catch.
  */
 MirrorDom.Viewer.prototype.apply_all_changesets = function(changesets, resume_pos) {
     try {
         this.perform_apply_all_changesets(changesets, resume_pos);
     } catch (e) {
+        // Got a diff path error, dump debug info to the console
         if (e instanceof MirrorDom.Util.PathError || e instanceof MirrorDom.Util.DiffError) {
             if (this.debug) {
                 this.log(e.message);
                 this.log("Path analysis: " + e.describe_path());
             }
             this.error_status = MirrorDom.RECEIVING_BAD;
+            this.fire_event("on_error_status", {"status": this.error_status});
             return;
         }
         else {
@@ -140,6 +164,12 @@ MirrorDom.Viewer.prototype.apply_all_changesets = function(changesets, resume_po
     }
 }
 
+/**
+ * Apply a bunch of changesets received from the server.
+ *
+ * @param changesets        List of [frame_path, changesets]
+ * @param resume_pos        Index of changeset to begin processing
+ */
 MirrorDom.Viewer.prototype.perform_apply_all_changesets = function(changesets, resume_pos) {
     // We have a list of changelogs for each iframe in our document.
     // The changelogs are ordered top to bottom, since the higher up frames
@@ -181,25 +211,28 @@ MirrorDom.Viewer.prototype.perform_apply_all_changesets = function(changesets, r
         var iframe_doc = MirrorDom.Util.get_document_object_from_iframe(iframe);
 
         // Commence iframe complexity
-        this.log("Iframe " + frame_path.join(",") +  " ready state: " + iframe_doc.readyState);
+        this.log("Changeset " + i + ": Iframe " + frame_path.join(",") +  " ready state: " + iframe_doc.readyState);
         if (iframe_doc.readyState == "uninitialized") {
-            this.log("Initialising iframe: " + i + " on frame " + frame_path.join(","));
+            this.log("Changeset " + i + ": Initialising iframe: " + i + " on frame " + frame_path.join(","));
             // Unset and re-set it to force a reload
             iframe.src = "";
-            iframe.src = this.blank_page;
+            // Hack: The "load" event doesn't trigger unless we force
+            // retrieving the blank page from the server. So far this has been
+            // observed in Firefox.
+            iframe.src = this.blank_page + "?" + (new Date()).getTime();
             var callback = make_reentry_callback(i);
             jQuery(iframe).load(callback);
             return;
         } else if (iframe_doc.readyState == 'loading') {
             // Scenario 1: Newly created iframe
-            this.log("Waiting for iframe to finish loading: " + i + " on frame " + frame_path.join(","));
+            this.log("Changeset " + i + ": Waiting for iframe to finish loading: " + i + " on frame " + frame_path.join(","));
             var callback = make_reentry_callback(i);
             jQuery(iframe).load(callback);
             return;
         } else if ("init_html" in changes && !has_loaded) {
             // Scenario 2: IFrame exists, but we have init_html and want to
             // start fresh. Let's load a blank page first.
-            this.log("Init HTML found for changeset " + i + " on frame " + frame_path.join(",") + ", resetting back to blank page");
+            this.log("Changeset " + i + ": Init HTML found for changeset " + i + " on frame " + frame_path.join(",") + ", resetting back to blank page");
             // Unset and re-set it to force a reload
             iframe.src = "";
             iframe.src = this.blank_page;
@@ -207,26 +240,39 @@ MirrorDom.Viewer.prototype.perform_apply_all_changesets = function(changesets, r
             jQuery(iframe).load(callback);
             return;
         } else {
-
-            // The url element is only supplied whenever init_html is supplied
-            if ("url" in changes && MirrorDom.Util.is_main_upath(frame_path)) {
-                this.fire_event("on_page_load", {"url": changes["url"]});
-            }
-
             // Scenario 3: Have diffs, let's proceed
             this.apply_changeset(iframe_doc.documentElement, changes);
 
-            // Remove item from changeset
+            // Reset variable for next loop
             has_loaded = false;
+        }
+    }
+
+    // We're at the very end now, let's do some finalisation
+    var first_frame_path = changesets[0][0];
+    var first_changes = changesets[0][1];
+    if (MirrorDom.Util.is_main_upath(first_frame_path)) {
+        var iframe = MirrorDom.Util.node_at_upath(this.iframe, first_frame_path);
+        var iframe_doc = MirrorDom.Util.get_document_object_from_iframe(iframe);
+
+        // The url element is only supplied whenever init_html is supplied
+        if ("url" in first_changes) {
+            this.fire_event("on_page_load", {"url": first_changes["url"]});
         }
     }
 }
 
+/**
+ * Apply a single changeset to a frame document
+ */
 MirrorDom.Viewer.prototype.apply_changeset = function(doc_elem, changelog) {
     if (changelog.init_html) {
         // init_html means a clean slate, so we're no longer concerned about
         // any previous diff errors encountered.
-        this.error_status = MirrorDom.RECEIVING_OK;
+        if (this.error_status == MirrorDom.RECEIVING_BAD) {
+            this.error_status = MirrorDom.RECEIVING_OK;
+            this.fire_event("on_error_status", {"status": this.error_status});
+        }
         this.log(changelog.last_change_id + ": Got new html!");
         this.apply_document(doc_elem, changelog.init_html);
     }
@@ -341,10 +387,14 @@ MirrorDom.Viewer.prototype.apply_document = function(doc_elem, data) {
     var current_body = doc_elem.getElementsByTagName('body')[0];
     if (current_body == null) {
         console.log(doc_elem.innerHTML);
-        throw new Error("No current body, what's going on?!");
+        throw new Error("Could not find <body> element in viewer document.");
     }
+
+    // Remove the body (previous we just emptied it, but this seems to have
+    // body.height() issues in Firefox)
     current_body = jQuery(current_body).empty();
-    current_body[0].style.cssText = "";
+    /*jQuery(current_body).remove();
+    current_body = jQuery("<body>").appendTo(doc_elem);*/
     var new_body_node = new_doc.find("body");
     this.copy_to_node(new_body_node, current_body, true);
 
@@ -421,18 +471,13 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
 
             // Create new element from the cloned node
             if (diff[0] == 'node') {
-                var cloned_node = diff[3];
-                var new_elem = document.createElement(cloned_node.nodeName);
-                for (var k in cloned_node.attributes) {
-                    new_elem.setAttribute(k, cloned_node.attributes[k]);
-                }
+                var new_elem = jQuery(diff[2])[0];
                 parent.appendChild(new_elem);
-                jQuery(new_elem).html(diff[2]);
 
                 // Apply all properties which doesn't get transmitted in
                 // innerHTML. Properties are in the form [path, property_dictionary]
                 // where path is relative to the newly added node.
-                var props = diff[4];
+                var props = diff[3];
                 for (var j=0; j < props.length; j++) {
                     var ppath = props[j][0];
                     var pnode = MirrorDom.Util.node_at_path(new_elem, ppath);
@@ -484,10 +529,17 @@ MirrorDom.Viewer.prototype.delete_node_and_remaining_siblings = function(node) {
 // ----------------------------------------------------------------------------
 // Event handling
 // ----------------------------------------------------------------------------
+MirrorDom.Viewer.prototype.add_event_listener = function(event, callback) {
+    if (this.event_listeners[event] == undefined) {
+        this.event_listeners[event] = [];
+    }
+    this.event_listeners[event].push(callback);
+}
 
 MirrorDom.Viewer.prototype.fire_event = function(event, data) {
-    if (this[event] != undefined) {
-        this[event](data);
+    if (this.event_listeners[event] == undefined) { return; }
+    for (var i=0; i < this.event_listeners[event].length; i++) {
+        this.event_listeners[event][i](data);
     }
 }
 

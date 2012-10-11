@@ -18,10 +18,10 @@
                     root_url: "{{mirrordom_uri}}/",
                     iframe:   document.getElementById("mirrordom_iframe"),
                     debug:    true,
-                    poll_interval: 2000
                 });
                 
-                broadcaster.start();
+                var POLL_INTERVAL = 2000;
+                window.setInterval(jQuery.proxy(broadcaster, "go"), POLL_INTERVAL)
             });
         </script>
     </head>

@@ -12,11 +12,12 @@
                 var viewer = new MirrorDom.Viewer({
                     root_url: "{{mirrordom_uri}}/",
                     iframe: document.getElementById("mirrordom_iframe"),
-                    poll_interval: 5000,
                     blank_page: "{{blank_page}}",
                     debug: true
                 });
-                viewer.start();
+
+                var POLL_INTERVAL = 2000;
+                window.setInterval(jQuery.proxy(viewer, "go"), POLL_INTERVAL);
             });
         </script>
     </head>

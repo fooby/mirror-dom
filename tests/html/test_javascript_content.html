@@ -14,9 +14,11 @@
         }
 
         function add_div() {
-            var div = jQuery("<div/>").appendTo(jQuery('body'));
-            div.text("Hello " + pick_random_item(text));
-            div.css('background-color', pick_random_item(colour));
+            var div = jQuery("<div/>").appendTo(jQuery('body'))
+              .text("Hello everybody")
+              .css('background-color', 'blue')
+              .attr("title", "title goes here")
+              .attr("onclick", "alert('hi')");
         }
 
         function change_some_css() {

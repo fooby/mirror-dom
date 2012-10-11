@@ -18,12 +18,13 @@
           broadcaster_iframe = document.getElementById("broadcaster_iframe");          
           viewer_iframe = document.getElementById("viewer_iframe");          
           broadcaster = new MirrorDom.Broadcaster({
-              iframe: broadcaster_iframe
+              iframe: broadcaster_iframe,
+              debug: true
           });
           viewer = new MirrorDom.Viewer({
               iframe: viewer_iframe,
-              blank_page: "blank.html"
-              //debug: true
+              blank_page: "blank.html",
+              debug: true
           });
       });
 

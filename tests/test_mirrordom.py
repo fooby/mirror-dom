@@ -95,35 +95,39 @@ class TestServer(util.TestBase):
         assert self.compare_html(to_html, result_html, clean=False)
 
 
-    UNSANITARY_INNERHTML = """
-    <!-- Random comment -->
-    hello world
-    <div id="blah">
+    UNSANITARY_HTML_FRAGMENT = """
+    <div>
+      <!-- Random comment -->
+      hello world
+      <div id="blah">
         <iframe src="http://removeme"> </iframe>
+      </div>
+      hlerhre
+      <script type="text/javascript">nope</script>
+      bye world
     </div>
-    hlerhre
-    <script type="text/javascript">nope</script>
-    bye world
     """
 
-    SANITARY_INNERHTML = """
-    hello world
-    <div id="blah">
-        <iframe> </iframe>
+    SANITARY_HTML_FRAGMENT = """
+    <div>
+      hello world
+      <div id="blah">
+          <iframe> </iframe>
+      </div>
+      hlerhre
+      bye world
     </div>
-    hlerhre
-    bye world
     """
-    def test_sanitise_innerhtml(self):
+    def test_sanitise_html_fragment(self):
         """
-        Test 2: Strip tags from node inner html (used for node diffs)
+        Test 2: Strip tags from node html fragment (used for node diffs)
         """
-        from_html = self.UNSANITARY_INNERHTML
-        to_html = self.SANITARY_INNERHTML
-        result_html = mirrordom.server.sanitise_innerhtml(from_html)
+        from_html = self.UNSANITARY_HTML_FRAGMENT
+        to_html = self.SANITARY_HTML_FRAGMENT
+        result_html = mirrordom.server.sanitise_html_fragment(from_html)
         assert self.compare_html(to_html, result_html, clean=False)
 
-    UNSANITARY_INNERHTML2 = """
+    UNSANITARY_HTML_FRAGMENT2 = """
     <tbody>
         <tr>
             <th class="heloworld">Blah</th>
@@ -136,7 +140,7 @@ class TestServer(util.TestBase):
     </tbody>
     """
 
-    SANITARY_INNERHTML2 = """
+    SANITARY_HTML_FRAGMENT2 = """
     <tbody>
         <tr>
             <th class="heloworld">Blah</th>
@@ -148,25 +152,25 @@ class TestServer(util.TestBase):
         </tr>
     </tbody>
     """
-    def test_sanitise_innerhtml2(self):
+    def test_sanitise_html_fragment2(self):
         """ Test 3: Strip tags from complex inner html """
-        from_html = self.UNSANITARY_INNERHTML2
-        to_html = self.SANITARY_INNERHTML2
-        result_html = mirrordom.server.sanitise_innerhtml(from_html, tag="table")
+        from_html = self.UNSANITARY_HTML_FRAGMENT2
+        to_html = self.SANITARY_HTML_FRAGMENT2
+        result_html = mirrordom.server.sanitise_html_fragment(from_html)
         # html5parser mangles the input too much, disable it
         assert self.compare_html(to_html, result_html, clean=False)
 
-    UNSANITARY_INNERHTML3 = """<td style="background-color: blue;">SDF</td>"""
-    SANITARY_INNERHTML3 = """<td style="background-color: blue;">SDF</td>"""
-    def test_sanitise_innerhtml3(self):
+    UNSANITARY_HTML_FRAGMENT3 = """<td style="background-color: blue;">SDF</td>"""
+    SANITARY_HTML_FRAGMENT3 = """<td style="background-color: blue;">SDF</td>"""
+    def test_sanitise_html_fragment3(self):
         """ Test 3: Strip tags from complex inner html """
-        from_html = self.UNSANITARY_INNERHTML3
-        to_html = self.SANITARY_INNERHTML3
-        result_html = mirrordom.server.sanitise_innerhtml(from_html, tag="tr")
+        from_html = self.UNSANITARY_HTML_FRAGMENT3
+        to_html = self.SANITARY_HTML_FRAGMENT3
+        result_html = mirrordom.server.sanitise_html_fragment(from_html)
         # html5parser mangles the input too much, disable it
         assert self.compare_html(to_html, result_html, clean=False)
 
-    UNSANITARY_INNERHTML_TBODY = """
+    UNSANITARY_HTML_FRAGMENT_TBODY = """
     <table>
         <colgroup span="1"></colgroup>
         <!-- Random comment -->
@@ -190,7 +194,7 @@ class TestServer(util.TestBase):
     </table>
     """
 
-    SANITARY_INNERHTML_TBODY = """
+    SANITARY_HTML_FRAGMENT_TBODY = """
     <table>
         <colgroup span="1"></colgroup>
         <thead>
@@ -219,15 +223,15 @@ class TestServer(util.TestBase):
     </table>
     """
 
-    def test_sanitise_innerhtml_tbody(self):
+    def test_sanitise_html_fragment_tbody(self):
         """ Test 3: Strip tags from complex inner html """
-        from_html = self.UNSANITARY_INNERHTML_TBODY
-        to_html = self.SANITARY_INNERHTML_TBODY
+        from_html = self.UNSANITARY_HTML_FRAGMENT_TBODY
+        to_html = self.SANITARY_HTML_FRAGMENT_TBODY
         result_html = mirrordom.server.sanitise_document(from_html)
         # html5parser mangles the input too much, disable it
         assert self.compare_html(to_html, result_html, clean=False)
 
-    UNSANITARY_INNERHTML_BAD_FORM_IN_TABLE = """
+    UNSANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE = """
     <html>
       <body>
         <table>
@@ -239,7 +243,7 @@ class TestServer(util.TestBase):
     </html>
     """
 
-    SANITARY_INNERHTML_BAD_FORM_IN_TABLE = """
+    SANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE = """
     <html>
       <body>
         <table>
@@ -252,9 +256,9 @@ class TestServer(util.TestBase):
       </body>
     </html>
     """
-    def test_sanitise_innerhtml_bad_form_in_table(self):
-        from_html = self.UNSANITARY_INNERHTML_BAD_FORM_IN_TABLE
-        to_html = self.SANITARY_INNERHTML_BAD_FORM_IN_TABLE
+    def test_sanitise_html_fragment_bad_form_in_table(self):
+        from_html = self.UNSANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE
+        to_html = self.SANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE
         result_html = mirrordom.server.sanitise_document(from_html)
         # html5parser mangles the input too much, disable it
         assert self.compare_html(to_html, result_html, clean=False)
@@ -285,7 +289,6 @@ class TestFirefox(util.TestBrowserBase):
         test. It may or may not be a simple string.
         """
         self.init_webdriver()
-
         init_html = self.webdriver.execute_script(
                 "return test_1_get_broadcaster_document()")
         init_html = json.loads(init_html)
@@ -312,7 +315,7 @@ class TestFirefox(util.TestBrowserBase):
         print "==DIFF=="
         print json.dumps(diff)
         diff = mirrordom.server.sanitise_diffs(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
         assert self.compare_frames()
 
@@ -337,6 +340,7 @@ class TestFirefox(util.TestBrowserBase):
 
         self.webdriver.switch_to_default_content()
         diff = self.webdriver.execute_script("return test_3_get_broadcaster_all_property_diffs()")
+        diff = json.loads(diff)
 
         # Only properties
         assert all(d[0] == "props" for d in diff)
@@ -349,7 +353,7 @@ class TestFirefox(util.TestBrowserBase):
         diff = mirrordom.server.sanitise_diffs(diff)
 
         # We can reuse test 2's diff apply thing
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
         # Verify the diff made it through
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -416,7 +420,7 @@ class TestFirefox(util.TestBrowserBase):
         diff = json.loads(diff)
         print diff
         diff = mirrordom.server.sanitise_diffs(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
         assert self.compare_frames()
 
     def test_diff_transfer_inserted_table(self):
@@ -431,7 +435,7 @@ class TestFirefox(util.TestBrowserBase):
         diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
         diff = json.loads(diff)
         diff = mirrordom.server.sanitise_diffs(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", diff)
+        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
         assert self.compare_frames()
 
 class TestIE(TestFirefox):

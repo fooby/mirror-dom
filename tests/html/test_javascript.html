@@ -67,10 +67,12 @@
       }
 
       function test_4_apply_viewer_diff(diffs) {
+          var diffs = JSON.parse(diffs);
           viewer.apply_diffs(null, diffs);
       }
 
       // Test 5: Test get initial property dump
+      // ------------------------------------------
       function test_5_get_broadcaster_all_property_diff() {
           var data = broadcaster.start_full_document();
           return data["props"];

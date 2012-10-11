@@ -51,11 +51,12 @@ MirrorDom.Util.get_document_object_from_iframe = function(iframe) {
             d = iframe.contentWindow.document;
         }
         else {
-            console.log("What the hell happened");
+            // Something went very wrong 
+            throw new Error("Could not retrieve IFrame document.");
         }
     }
     else {
-        throw new Error("iframe has not been set");
+        throw new Error("IFrame is null");
     }
 
     return d;
@@ -146,6 +147,25 @@ MirrorDom.Util.get_text_node_content = function(node) {
         node = node.previousSibling;
     }
     return value.join("");
+}
+
+
+/**
+ * Get node OuterHTML
+ *
+ * http://stackoverflow.com/questions/1700870/how-do-i-do-outerhtml-in-firefox
+ */
+
+MirrorDom.Util.get_outerhtml = function(node) {
+    if (node.outerHTML !== undefined) {
+        return node.outerHTML;
+    }
+
+    var div = document.createElement('div');
+    div.appendChild( node.cloneNode(true) );
+    var result = div.innerHTML;
+    div = null;
+    return result;
 }
 
 /**
@@ -471,26 +491,3 @@ MirrorDom.Util.describe_node_at_upath = function(root, upath) {
 MirrorDom.Util.is_main_upath = function(upath) {
     return (upath.length == 1 && upath[0] == 'm');
 }
-
-
-/* JQuery-XHR implementation of server push - we just POST all the data to
- * root_url + the method name */
- 
-MirrorDom.JQueryXHRPusher = function(root_url) {
-    this.root_url = root_url;
-};
-
-/**
- * @param args      Either a mapping or a string
- */
-MirrorDom.JQueryXHRPusher.prototype.push = function(method, args, callback) {
-    for (var k in args) {
-        if (jQuery.isPlainObject(args[k]) || jQuery.isArray(args[k])) {
-            args[k] = JSON.stringify(args[k]);
-        }
-    }
-
-    jQuery.post(this.root_url + method, args, function(result) {
-        if (callback) callback(JSON.parse(result));
-    });
-};

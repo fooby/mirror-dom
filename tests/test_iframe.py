@@ -171,8 +171,6 @@ class TestFirefox(util.TestBrowserBase):
 
         Moment of truth!
         """
-        import time
-        time.sleep(5.0)
         self.test_process_send_update_messages()
         # Set from test_process_mirrordom_iframe_messages
         storage = self.storage
@@ -210,6 +208,8 @@ class TestFirefox(util.TestBrowserBase):
         Test 9: Apply modification update messages
         """
         self.test_send_update_messages2()
+        import time
+        time.sleep(5.0)
         storage = self.storage
         updates = mirrordom.server.handle_get_update(storage)
         self.webdriver.execute_script("test_7_apply_updates(arguments[0])",

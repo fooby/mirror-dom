@@ -34,10 +34,12 @@ MirrorDom.Broadcaster = function(options, parent_details) {
         this.path_in_parent = parent_details["path_in_parent"];
         // Reference to parent broadcaster
         this.parent = parent_details["parent"];
+        this.event_listeners = null;
     } else {
         this.frame_type = 'm';
         this.path_in_parent = [];
         this.parent = null;
+        this.event_listeners = {};
     }
 
     // Mapping of path keys -> broadcaster object for child iframes
@@ -51,19 +53,19 @@ MirrorDom.Broadcaster = function(options, parent_details) {
 
     // Polling and comms (top level iframe only)
     this.sending = false;
-    this.interval_event = null;
 
     // Misc
     this.debug = false;
 
     // Initialise options
     this.init_options(options);
+    
+    // Attach load handler
+    jQuery(this.iframe).on("load.mirrordom", jQuery.proxy(this.handle_load_page, this));
 }
 
 /**
  * Extract options from constructor arg
- *
- * @param poll_interval     Interval between scans (ms)
  *
  * @param options           Broadcaster options
  *
@@ -77,43 +79,39 @@ MirrorDom.Broadcaster = function(options, parent_details) {
  */
 MirrorDom.Broadcaster.prototype.init_options = function(options) {
     // Transport mechanism
-    if (options.pusher) {
-        this.pusher = options.pusher;
+    if (options.push_method) {
+        this.push_method = options.push_method;
     } else if (options.root_url) {
-        this.pusher = new MirrorDom.JQueryXHRPusher(options.root_url);
-    } else {
-        this.pusher = null;
+        var pusher = new MirrorDom.JQueryXHRPusher(options.root_url);
+        this.push_method = jQuery.proxy(pusher, "push");
     }
 
-    // Set the poll interval
-    this.poll_interval = options.poll_interval != null ? options.poll_interval : 1000;
+    // Force the poll message to be sent even if no data we need to send
+    this.force_poll = options.force_poll ? true : false;
 
     // Iframe MUST exist
     this.iframe = options.iframe;
 
     // Debug log messages
     this.debug = options.debug ? true : false;
-
-    // Callbacks
-    this.on_page_load = options.on_page_load;
 };
 
 
 // ----------------------------------------------------------------------------
 // Public functions
 // ----------------------------------------------------------------------------
-MirrorDom.Broadcaster.prototype.start = function() {
-    this.log("Poll interval: " + this.poll_interval);
 
-    // Attach load handler
-    jQuery(this.iframe).on("load.mirrordom", jQuery.proxy(this.handle_load_page, this));
-
+/**
+ * Perform a single iteration of mirrordom logic.
+ *
+ * This function should be called at regular intervals to get semi-responsive
+ * browser synchronisation. 
+ */
+MirrorDom.Broadcaster.prototype.go = function() {
     this.poll();
+}
 
-    // Start the interval
-    this.interval_event = window.setInterval(jQuery.proxy(this.poll, this),
-            this.poll_interval);
-};
+
 // ----------------------------------------------------------------------------
 // Core logic
 //
@@ -295,13 +293,19 @@ MirrorDom.Broadcaster.prototype.rewrite_link_targets = function() {
 // ----------------------------------------------------------------------------
 // Event handling
 // ----------------------------------------------------------------------------
-MirrorDom.Broadcaster.prototype.fire_event = function(event, data) {
-    if (this[event] != undefined) {
-        this[event](data);
+MirrorDom.Broadcaster.prototype.add_event_listener = function(event, callback) {
+    if (this.event_listeners[event] == undefined) {
+        this.event_listeners[event] = [];
     }
+    this.event_listeners[event].push(callback);
 }
 
-
+MirrorDom.Broadcaster.prototype.fire_event = function(event, data) {
+    if (this.event_listeners == undefined || this.event_listeners[event] == undefined ) { return; }
+    for (var i=0; i < this.event_listeners[event].length; i++) {
+        this.event_listeners[event][i](data);
+    }
+}
 
 // ----------------------------------------------------------------------------
 // Internal utility functions
@@ -358,23 +362,18 @@ MirrorDom.Broadcaster.prototype.poll = function() {
     var messages = []
     this.process_and_get_messages(messages);
 
-    if (messages.length > 0) {
+    if (this.force_poll || messages.length > 0) {
         // Grab iframes to inform the server which iframes are in fact still
         // active after these latest changes.
         var iframes = this.get_all_iframe_paths();
-        this.pusher.push('send_update', {"messages": messages, "iframes": iframes});
+        this.push_method('send_update', {"messages": messages, "iframes": iframes});
     }
-
-    //this.destroy();
 }
 
 /**
  * Clean up when we no longer need the broadcaster object
  */
 MirrorDom.Broadcaster.prototype.destroy = function() {
-    // Stop the interval polling if applicable
-    this.stop_interval();
-
     // Unload child iframe broadcasters
     this.destroy_child_iframes();
 
@@ -385,15 +384,6 @@ MirrorDom.Broadcaster.prototype.destroy = function() {
     //jQuery(this.iframe).off(".mirrordom");
 }
 
-/**
- * Stop the interval
- */
-MirrorDom.Broadcaster.prototype.stop_interval = function() {
-    if (this.interval_event != null) {
-        window.clearInterval(this.interval_event);
-        this.interval_event = null;
-    }
-};
 
 /**
  * Populate a list with all iframe paths
@@ -715,7 +705,8 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
             dom_iterator.run();
 
             // Ok, add the new node
-            diffs.push(['node', ipath, node.innerHTML, this.clone_node(node), prop_diffs]);
+            var html = MirrorDom.Util.get_outerhtml(node);
+            diffs.push(['node', ipath, html, prop_diffs]);
             break;
         case 3:
             // TEXT
@@ -990,3 +981,29 @@ MirrorDom.Broadcaster.prototype.rewrite_targets_in_dom_iterator = function(node,
         this.log("Rewrote a target attribute while iterating");
     }
 }
+
+// ----------------------------------------------------------------------------
+// Tranport
+// ----------------------------------------------------------------------------
+
+/* JQuery-XHR implementation of server push - we just POST all the data to
+ * root_url + the method name */
+ 
+MirrorDom.JQueryXHRPusher = function(root_url) {
+    this.root_url = root_url;
+};
+
+/**
+ * @param args      Either a mapping or a string
+ */
+MirrorDom.JQueryXHRPusher.prototype.push = function(method, args, callback) {
+    for (var k in args) {
+        if (jQuery.isPlainObject(args[k]) || jQuery.isArray(args[k])) {
+            args[k] = JSON.stringify(args[k]);
+        }
+    }
+
+    jQuery.post(this.root_url + method, args, function(result) {
+        if (callback) callback(JSON.parse(result));
+    });
+};
