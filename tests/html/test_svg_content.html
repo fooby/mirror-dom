@@ -1,0 +1,37 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=9">
+    <title>helo</title>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript">
+
+        function make_svg(tag, attrs) {
+            var el= document.createElementNS('http://www.w3.org/2000/svg', tag);
+            for (var k in attrs)
+                el.setAttribute(k, attrs[k]);
+            return el;
+        }
+        
+        function add_svg_node(el) {
+           var svg = document.getElementById("thesvg");
+           svg.appendChild(el);
+        }
+
+        function change_svg_text(text) {
+           var text_elem = document.getElementById("svg_text");
+           text_elem.textContent = text;
+        }
+    </script>
+  </head>
+  <body>
+    <h1>SVG test</h1>
+    <svg id="thesvg" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+        <rect x="10" y="10" height="100" width="100" style="stroke:#ff0000; fill: #0000ff"/>
+        <text id="svg_text" x="0" y="105" fill="red">SVG Text node</text>
+
+        <!-- This MUST be the last element in the SVG. Also, this must be the ONLY line element in the SVG -->
+        <line x1="0" y1="0" x2="10" y2 = "110" style="stroke:#00ff00; stroke-width: 2"/>
+    </svg>
+  </body>
+</html>

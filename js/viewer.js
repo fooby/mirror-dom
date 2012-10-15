@@ -429,39 +429,37 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
         // Diff structure:
         //
         // 0) "node", "text", "deleted", "attribs", "props"
-        // 1) Path to node (node offsets at each level of tree)
+        // 1) Type: "html" or "svg"
+        // 2) Path to node (node offsets at each level of tree)
         //
         // For "node", "text":
-        // 2) Inner HTML
-        // 3) Element definition:
+        // 3) Inner HTML
+        // 4) Element definition:
         //    - attributes: HTML attributes
         //    - nodeName:   Node name
         //    - nodeType:   Node type
-        // 4) Extra properties to apply
+        // 5) Extra properties to apply
         //
         // For "attribs", "props":
-        // 2) Dictionary of changed attributes
-        // 3) Dictionary of removed attributes (may be omitted)
+        // 3) Dictionary of changed attributes
+        // 4) Dictionary of removed attributes (may be omitted)
         //
         // For "deleted":
         // nope
 
         if (diff[0] == 'node' || diff[0] == 'text') {
             var parent = MirrorDom.Util.node_at_path(root, 
-                diff[1].slice(0, diff[1].length-1));
+                diff[2].slice(0, diff[2].length-1));
 
             var node = parent.firstChild;
             node = MirrorDom.Util.apply_ignore_nodes(node);
 
             // Go to node referenced in offset and replace it 
             // if it exists; and delete all following nodes
-            for (var d=0; d < diff[1][diff[1].length-1]; d++) {
-
+            for (var d=0; d < diff[2][diff[2].length-1]; d++) {
                 if (node == null) {
-                    // Path is invalid, throw error
-                    throw new MirrorDom.Util.DiffError(diff, root, diff[1]);
+                    throw new MirrorDom.Util.DiffError(diff, root, diff[2]); // Path is invalid, throw error
                 }
-
                 node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
             }
 
@@ -469,38 +467,51 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
             // reconstruction of ALL our remaining sibling nodes.
             this.delete_node_and_remaining_siblings(node);
 
+            var node_type = diff[1];
+
             // Create new element from the cloned node
             if (diff[0] == 'node') {
-                var new_elem = jQuery(diff[2])[0];
-                parent.appendChild(new_elem);
+                switch (node_type) {
+                    case "svg":
+                        // TODO: Manage the situation when node corresponds to entire XML doc
+                        var svg_doc = parent.ownerDocument;
+                        var new_elem = MirrorDom.Util.to_svg(svg_doc, diff[3]);
+                        parent.appendChild(new_elem);
+                        break;
+                    case "html":
+                        var new_elem = jQuery(diff[3])[0];
+                        parent.appendChild(new_elem);
 
-                // Apply all properties which doesn't get transmitted in
-                // innerHTML. Properties are in the form [path, property_dictionary]
-                // where path is relative to the newly added node.
-                var props = diff[3];
-                for (var j=0; j < props.length; j++) {
-                    var ppath = props[j][0];
-                    var pnode = MirrorDom.Util.node_at_path(new_elem, ppath);
-                    this.apply_props(props[j][1], null, pnode, ppath);
+                        // Apply all properties which doesn't get transmitted in
+                        // innerHTML. Properties are in the form [path, property_dictionary]
+                        // where path is relative to the newly added node.
+                        var props = diff[4];
+                        for (var j=0; j < props.length; j++) {
+                            var ppath = props[j][1];
+                            var node_type = props[j][0];
+                            var pnode = MirrorDom.Util.node_at_path(new_elem, ppath);
+                            this.apply_props(props[j][2], null, pnode, ppath);
+                        }
+                        break;
                 }
             } else {
-                var new_elem = document.createTextNode(diff[2]);
+                var new_elem = document.createTextNode(diff[3]);
                 parent.appendChild(new_elem);
             }
 
         } else if (diff[0] == 'attribs') {
-            // diff[2] = changed attributes
-            // diff[3] = removed attributes
-            var node = MirrorDom.Util.node_at_path(root, diff[1]);
-            this.apply_attrs(diff[2], diff[3], node, diff[1]);
+            // diff[3] = changed attributes
+            // diff[4] = removed attributes
+            var node = MirrorDom.Util.node_at_path(root, diff[2]);
+            this.apply_attrs(diff[3], diff[4], node, diff[2]);
         } else if (diff[0] == 'props') {
-            // diff[2] = changed properties
-            // diff[3] = removed properties (may not exist)
-            var removed = (diff.length == 4) ? diff[3] : null;
-            var node = MirrorDom.Util.node_at_path(root, diff[1]);
-            this.apply_props(diff[2], removed, node, diff[1]);
+            // diff[3] = changed properties
+            // diff[4] = removed properties (may not exist)
+            var removed = (diff.length == 4) ? diff[4] : null;
+            var node = MirrorDom.Util.node_at_path(root, diff[2]);
+            this.apply_props(diff[3], removed, node, diff[2]);
         } else if (diff[0] == 'deleted') {
-            var node = MirrorDom.Util.node_at_path(root, diff[1]);
+            var node = MirrorDom.Util.node_at_path(root, diff[2]);
             this.delete_node_and_remaining_siblings(node);
         } 
     }

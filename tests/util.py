@@ -407,12 +407,15 @@ class TestBrowserBase(TestBase):
 # Diff comparison utilities
 # -----------------------------------------------------------------------------
 
-def diff_extract(diff):
-    if len(diff) == 3:
-        type, path, added = diff
+def attr_prop_diff_extract(diff):
+    """
+    Extract property/attr diffs (not for use on on deleted, added diffs)
+    """
+    if len(diff) == 4:
+        diff_type, node_type, path, added = diff
         return type, path, added, None
-    elif len(diff) == 4:
-        type, path, added, removed = diff
+    elif len(diff) == 5:
+        diff_type, node_type, path, added, removed = diff
         return type, path, added, removed
 
 def diff_contains_changed_property_key(diffs, s):
@@ -430,7 +433,7 @@ def diff_contains_changed_property_key(diffs, s):
             return False
         return any(value in v.lower() for v in lst)
     return any(dict_key_contains(added, s) or list_contains(removed, s) \
-            for _, _, added, removed in map(diff_extract, prop_diffs))
+            for _, _, added, removed in map(attr_prop_diff_extract, prop_diffs))
 
 
 def diff_contains_changed_property_value(diffs, s):
@@ -447,7 +450,7 @@ def diff_contains_changed_property_value(diffs, s):
         return any(value in v.lower() for v in dct.itervalues() \
                 if isinstance(v, basestring))
     return any(dict_value_contains(added, s) \
-            for _, _, added, removed in map(diff_extract, prop_diffs))
+            for _, _, added, removed in map(attr_prop_diff_extract, prop_diffs))
 
 
 def diff_contains_changed_attribute(diffs, s):
@@ -467,7 +470,7 @@ def diff_contains_changed_attribute(diffs, s):
         return any(value in v.lower() for v in lst)
 
     return any(dict_key_contains(added, s) or list_contains(removed, s) \
-            for _, _, added, removed in map(diff_extract, attr_diffs))
+            for _, _, added, removed in map(attr_prop_diff_extract, attr_diffs))
 
 def diff_contains_empty_attr_prop_values(diffs):
     """
@@ -478,4 +481,4 @@ def diff_contains_empty_attr_prop_values(diffs):
     def dict_value_empty(dct):
         return any(not v for v in dct.itervalues())
     return any(dict_value_empty(added) \
-            for _, _, added, removed in map(diff_extract, attr_prop_diffs))
+            for _, _, added, removed in map(attr_prop_diff_extract, attr_prop_diffs))

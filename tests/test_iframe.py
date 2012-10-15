@@ -8,6 +8,7 @@ import sys
 import os
 import json
 import time
+import pprint
 
 import util
 import test_javascript
@@ -125,6 +126,7 @@ class TestFirefox(util.TestBrowserBase):
         Test 5: Check mirrordom messages contain initial html frame content.
         """
         self.init_webdriver()
+
         # Let's just throw in the dynamic iframe for good measure
         self.webdriver.execute_script("test_2_add_dynamic_iframe()")
         #self.webdriver.execute_script("test_1_start_broadcaster_document()")
@@ -193,6 +195,8 @@ class TestFirefox(util.TestBrowserBase):
         messages = self.webdriver.execute_script(
                 "return test_5_process_and_get_messages()");
         messages = json.loads(messages)
+        print "===Messages 2:===\n\n"
+        print pprint.pformat(messages)
         mirrordom.server.handle_send_update(storage, messages["messages"],
                 messages["iframes"])
 
@@ -208,8 +212,6 @@ class TestFirefox(util.TestBrowserBase):
         Test 9: Apply modification update messages
         """
         self.test_send_update_messages2()
-        import time
-        time.sleep(5.0)
         storage = self.storage
         updates = mirrordom.server.handle_get_update(storage)
         self.webdriver.execute_script("test_7_apply_updates(arguments[0])",

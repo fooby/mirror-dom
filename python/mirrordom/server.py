@@ -158,13 +158,13 @@ def sanitise_node_diff(diff):
     Sanitise the node HTML (note: diffs now contain the node's outerHTML, not
     innerHTML as in earlier versions).
     """
-    # [1] Path [2] inner html [3] attrs [4] prop tree
+    # [1] Path [2] type [3] outer html [5] prop tree
 
     # Temporary workaround to prevent SVG elements causing errors (they
     # don't have innerHTML). TODO: FIX
-    if diff[2] is None:
+    if diff[3] is None:
         return
-    diff[2] = sanitise_html_fragment(diff[2])
+    diff[3] = sanitise_html_fragment(diff[3])
 
 def sanitise_html_fragment(html):
     doc = sanitise_document(html, return_etree=True, use_html5lib=False)

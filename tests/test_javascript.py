@@ -109,8 +109,8 @@ class TestFirefox(util.TestBrowserBase):
         self.init_webdriver()
         # This triggers clone_dom() in the broadcaster js object, so that diffing works
         self.webdriver.execute_script("test_3_modify_broadcaster_document_with_add_node()")
-        result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
-        print result
+        diffs = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
+        print "Diff: %s" % (diffs)
 
         # Expected result should be identical to:
         # [[u'node', [1,5], u'<div title="title goes here" onclick="alert('hi')">Hello everybody</div>',
@@ -118,9 +118,9 @@ class TestFirefox(util.TestBrowserBase):
 
         EXPECTED_NODE_HTML = """<div title="title goes here" onclick="alert('hi')">Hello everybody</div>"""
 
-        assert len(result) == 1
-        html = result[0][2]
-        props = result[0][3]
+        assert len(diffs) == 1
+        html = diffs[0][3]
+        props = diffs[0][4]
 
         # Warning: innerHTML works different between different browsers
         # (i.e. IE will mangle innerHTML with dynamic property updates we can't
@@ -132,7 +132,7 @@ class TestFirefox(util.TestBrowserBase):
         assert len(props) == 1
 
         # Prop should be: [], {u'style.cssText': u'background-color: red;'}
-        prop_path, changed_props = props[0]
+        node_type, prop_path, changed_props = props[0]
         assert "style.cssText" in changed_props
         # The path should be empty as the style applies directly to the node
         assert prop_path == []
@@ -140,7 +140,7 @@ class TestFirefox(util.TestBrowserBase):
     def test_apply_add_node_diff(self):
         """ Test 4: Apply a simple add node diff """
         self.init_webdriver()
-        diff = [[u'node', [1, 4], u'<div style="background-color: red">Hello There</div>', []]]
+        diff = [[u'node', 'html', [1, 4], u'<div style="background-color: red">Hello There</div>', []]]
         self.webdriver.execute_script("test_4_setup_viewer_document()")
         self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
 
@@ -217,7 +217,7 @@ class TestFirefox(util.TestBrowserBase):
         new_value = "gSE_AU*)EHGSIODNGO"
         # Assuming that the <input id="thetextinput">  element is at position
         # [1,2,0] in test_javascript_content_sanitised.html
-        diff = [[u'props', [1, 2, 0], {u'value': new_value}, None]]
+        diff = [[u'props', 'html', [1, 2, 0], {u'value': new_value}, None]]
         self.webdriver.execute_script("test_4_setup_viewer_document()")
 
         # Value should be default to "hello"
@@ -245,7 +245,7 @@ class TestFirefox(util.TestBrowserBase):
         # Assuming that the <table id="thetable">  element is at position
         # [1,1,1] in test_javascript_content_sanitised.html. This should
         # change cellSpacing to 4
-        diff = [[u'attribs', [1, 1, 1], {u'cellSpacing': new_value}, []]]
+        diff = [[u'attribs', 'html', [1, 1, 1], {u'cellSpacing': new_value}, []]]
         self.webdriver.execute_script("test_4_setup_viewer_document()")
 
         # Cellspacing shouldn't be set yet
@@ -276,7 +276,7 @@ class TestFirefox(util.TestBrowserBase):
         self.init_webdriver()
         
         # This should delete the <a id="textinput"> at the end of the page
-        diff = [[u'deleted', [1, 4]]]
+        diff = [[u'deleted', 'html', [1, 4]]]
         self.webdriver.execute_script("test_4_setup_viewer_document()")
 
         # Just make sure it's there first

@@ -463,7 +463,8 @@ MirrorDom.Broadcaster.prototype.clone_node = function(node, include_properties) 
         'attributes': {},
         'nodeName':   node.nodeName,
         'nodeType':   node.nodeType,
-        'nodeValue':  node.nodeValue
+        'nodeValue':  node.nodeValue,
+        'namespaceURI':  node.namespaceURI
     };
 
     if (node.attributes) {
@@ -627,6 +628,7 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
                 
                 // Handle delete messages for the nodes
                 cnode_ipath = ipath.slice();
+                
                 this.handle_diff_delete_nodes(diffs, cnode_ipath, cnode);
                     
                 // Now handle add messages to recreate all the nodes
@@ -706,12 +708,13 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
 
             // Ok, add the new node
             var html = MirrorDom.Util.get_outerhtml(node);
-            diffs.push(['node', ipath, html, prop_diffs]);
+            var type = MirrorDom.Util.get_node_doc_type(node); // svg or html
+            diffs.push(['node', type, ipath, html, prop_diffs]);
             break;
         case 3:
             // TEXT
-            //diffs.push(['text', ipath, node.textContent]);
-            diffs.push(['text', ipath, MirrorDom.Util.get_text_node_content(node)]);
+            var type = MirrorDom.Util.get_node_doc_type(node); // svg or html
+            diffs.push(['text', type, ipath, MirrorDom.Util.get_text_node_content(node)]);
             break;
     }
 }
@@ -725,7 +728,8 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
  * @param cnode         Node cloned in clone_node() (not an actual DOM node)
  */
 MirrorDom.Broadcaster.prototype.handle_diff_delete_nodes = function(diffs, ipath, cnode) {
-    diffs.push(['deleted', ipath.slice()]);
+    var type = MirrorDom.Util.get_node_doc_type(cnode); // html or svg
+    diffs.push(['deleted', type, ipath.slice()]);
 
     ipath = ipath.slice();
     // Scan for iframes which have been deleted
@@ -785,7 +789,8 @@ MirrorDom.Broadcaster.prototype.handle_diff_node_properties = function(diffs, ip
     }
 
     if (diff) {
-        diffs.push(['props', ipath.slice(), changed_props, removed_props]);
+        var type = MirrorDom.Util.get_node_doc_type(dnode); // html or svg
+        diffs.push(['props', type, ipath.slice(), changed_props, removed_props]);
     }
 }
 
@@ -852,7 +857,8 @@ MirrorDom.Broadcaster.prototype.handle_diff_node_attributes = function(diffs, ip
     }
 
     if (diff) {
-        diffs.push(['attribs', ipath.slice(), changed_attribs, removed_attribs]);
+        var type = MirrorDom.Util.get_node_doc_type(dnode); // html or svg
+        diffs.push(['attribs', type, ipath.slice(), changed_attribs, removed_attribs]);
     }
 };
 
@@ -955,7 +961,8 @@ MirrorDom.Broadcaster.prototype.collect_props_from_dom_iterator = function(node,
     if (node.nodeType == 1) {
         var props = MirrorDom.Util.get_properties(node);
         if (props != null) {
-            data.push([ipath.slice(), props]);
+            var type = MirrorDom.Util.get_node_doc_type(node); // html or svg
+            data.push([type, ipath.slice(), props]);
         }
     }
 }

@@ -3,24 +3,42 @@ var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 MirrorDom.Util = {}
 
 
+// ============================================================================
+// Property handling
+// ============================================================================
 /**
  * Split property path by "." (purely for style.cssText's benefit)
  *
- * Returns a list of [(original path, [list of path elements])]
+ * Returns a dictionary of {domain: [(original path, [list of path elements])]}
  *
  * e.g. The if prop_paths is ["style.cssText"], the return value is
  *      [["style.cssText", ["style", "cssText"]]]
  */
-MirrorDom.Util.process_property_paths = function(prop_paths) {
-    var prop_names = [];
-    for (var i = 0; i < prop_paths.length; i++) {
-        var prop_text = prop_paths[i];
-        prop_names.push([prop_text, prop_text.split('.')]);
+MirrorDom.Util.process_property_paths = function(prop_domains) {
+     var result = {};
+
+    for (domain in prop_domains) {
+        // svg or html
+        var prop_paths = prop_domains[domain];
+
+        // pre-split the property lookups
+        var prop_names = [];
+        for (var i = 0; i < prop_paths.length; i++) {
+            var prop_text = prop_paths[i];
+            prop_names.push([prop_text, prop_text.split('.')]);
+        }
+        
+        result[domain] = prop_names;
     }
-    return prop_names;
+
+    return result;
 }
 
-MirrorDom.Util.PROPERTY_NAMES = ["disabled", "value", "checked", "style.cssText", "className", "colSpan"];
+MirrorDom.Util.PROPERTY_NAMES = {
+    "html": ["disabled", "value", "checked", "style.cssText", "className", "colSpan"],
+    "svg":  []
+};
+
 MirrorDom.Util.IGNORE_ATTRIBS = {"style": null};
 MirrorDom.Util.PROPERTY_LOOKUP = MirrorDom.Util.process_property_paths(MirrorDom.Util.PROPERTY_NAMES);
 
@@ -28,13 +46,16 @@ MirrorDom.Util.PROPERTY_LOOKUP = MirrorDom.Util.process_property_paths(MirrorDom
  * @param node      
  */
 MirrorDom.Util.get_property_lookup_list = function(node) {
-    if (node.namespaceURI == "http://www.w3.org/2000/svg") {
-        return [];
+    if (node.namespaceURI == MirrorDom.Util.SVG_NAMESPACE) {
+        return MirrorDom.Util.PROPERTY_LOOKUP["svg"];
     } else {
-        return MirrorDom.Util.PROPERTY_LOOKUP;
+        return MirrorDom.Util.PROPERTY_LOOKUP["html"];
     }
 }
 
+// ============================================================================
+// Iframes
+// ============================================================================
 /**
  * @param iframe        Iframe object
  */
@@ -61,6 +82,12 @@ MirrorDom.Util.get_document_object_from_iframe = function(iframe) {
 
     return d;
 }
+
+
+// ============================================================================
+// Node processing
+// ============================================================================
+
 
 /**
  * Checks whether we should ignore the node when building the tree
@@ -217,6 +244,124 @@ MirrorDom.Util.get_property = function(node, prop_lookup) {
     return [true, prop];
 }
 
+MirrorDom.Util.HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+MirrorDom.Util.SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+/**
+ * "HTML"
+ */
+MirrorDom.Util.get_node_doc_type = function(node) {
+    // Text node needs to reference parent
+    var n = (node.nodeType == 3) ? node.parentNode : node;
+    switch (n.namespaceURI) {
+        case MirrorDom.Util.HTML_NAMESPACE:
+            return "html";
+        case MirrorDom.Util.SVG_NAMESPACE:
+            return "svg";
+        default:
+            return "html";
+    }
+}
+
+
+// ============================================================================
+// SVG
+// ============================================================================
+
+
+
+/**
+ * @param svg_doc       SVGDocument to which this belongs (null if node_xml is
+ *                      the actual SVG document)
+ *
+ * @param node_xml      XML fragment
+ */
+MirrorDom.Util.to_svg = function(svg_doc, node_xml) {
+    var parser = new DOMParser();
+    var parsed_svg = parser.parseFromString(node_xml, "image/svg+xml");
+    var d = svg_doc || document; // Note: Using document ONLY works if node_xml contains the entire SVG docoument
+
+    function copy_svg_node(node) {
+
+        switch (node.nodeType) {
+
+            case 1:
+                var elem = d.createElementNS(MirrorDom.Util.SVG_NAMESPACE, node.tagName);
+                for (var i = 0; i < node.attributes.length; i++) {
+                    var attrib = node.attributes[i];
+                    // FIX
+                    //elem.setAttributeNS(MirrorDom.Util.SVG_NAMESPACE);
+                    var ns = attrib.namespaceURI || null;
+                    //var ns = attrib.namespaceURI;
+                    elem.setAttributeNS(ns, attrib.name, attrib.value);
+                }
+                return elem;
+            case 3:
+                var text = d.createTextNode(node.textContent);
+                return text;
+
+            default:
+                // hmm
+        }
+
+    }
+
+    var root = parsed_svg.documentElement;
+    var node = root;
+    var out_root = copy_svg_node(root);
+    var out_node = out_root;
+
+    // This is similar to broadcaster's clone node, actually
+    while (node) {
+        if (node.firstChild) {
+            var child = copy_svg_node(node.firstChild);
+            out_node.appendChild(child);
+            node = node.firstChild;
+            out_node = child;
+            continue;
+        } else if (node.nextSibling) {
+            var sibling = copy_svg_node(node.nextSibling);
+            out_node.parentNode.appendChild(sibling);
+            node = node.nextSibling;
+            out_node = sibling;
+        } else {
+            while (!node.nextSibling) {
+                if (node === root) {
+                    return out_root;
+                }
+                node = node.parentNode;
+                out_node = out_node.parentNode;
+            }
+
+            var sibling = copy_svg_node(node.nextSibling);
+            out_node.parentNode.appendChild(sibling);
+            node = node.nextSibling;
+            out_node = sibling;
+    }
+
+    // unreachable
+    return null;
+};
+
+/**
+ * Extract relevant data from the node
+ */
+MirrorDom.Broadcaster.prototype.clone_node = function(node, include_properties) {
+    // deep copy.
+    var clone = {
+        'attributes': {},
+        'nodeName':   node.nodeName,
+        'nodeType':   node.nodeType,
+        'nodeValue':  node.nodeValue,
+        'namespaceURI':  node.namespaceURI
+    };
+
+    if (node.attributes) {
+        }
+    }
+}
+
+
 /**
  * ============================================================================
  * Errors
@@ -256,13 +401,15 @@ MirrorDom.Util.DiffError.prototype.describe_path = function() {
  * ============================================================================
  */
 MirrorDom.Util.get_properties = function(node) {
+    var property_list = MirrorDom.Util.get_property_lookup_list(node);
+
     if (node.nodeType == 1) {
         // Let's go check the node
         var new_props = {}
         var diff = false;
-        for (var i = 0; i < this.PROPERTY_LOOKUP.length; i++) {
-            var prop_text = this.PROPERTY_LOOKUP[i][0];
-            var prop_lookup = this.PROPERTY_LOOKUP[i][1];
+        for (var i = 0; i < property_list.length; i++) {
+            var prop_text = property_list[i][0];
+            var prop_lookup = property_list[i][1];
             var prop_result = MirrorDom.Util.get_property(node, prop_lookup);
             var prop_found = prop_result[0];
             var prop_value = prop_result[1];
