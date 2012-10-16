@@ -243,10 +243,8 @@ def sanitise_document(html, return_etree=False, use_html5lib=False):
 
     # Find anchors and strip hrefs        
     for anchor in final_html_tree.iter('a'):
-        try:
-            anchor.attrib.pop("href")
-        except KeyError:
-            pass
+        if "href" in anchor.attrib:
+            anchor.attrib["href"] = "#"
 
     # Strip javascript (copied from lxml.html.clean.Cleaner code, but that does
     # more than we want)

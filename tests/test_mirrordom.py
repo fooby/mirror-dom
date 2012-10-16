@@ -72,7 +72,7 @@ class TestServer(util.TestBase):
     <div>
       <input id="text_input" type="text" size="50" value="hello"></input>
     </div>
-    <a>Page 2</a>
+    <a href="#">Page 2</a>
     <iframe name="theiframe" id="theiframe"> </iframe>
   </body>
 </html>
@@ -272,16 +272,16 @@ class TestServer(util.TestBase):
 
     SANITARY_HTML_FRAGMENT_LINK = """
         <div>
-            <a>Google</a>
-            <a>Blah</a>
-            <a>Evil</a>
+            <a href="#">Google</a>
+            <a href="#">Blah</a>
+            <a href="#">Evil</a>
         </div>"""
 
     def test_sanitise_links(self):
         from_html = self.UNSANITARY_HTML_FRAGMENT_LINK
         to_html = self.SANITARY_HTML_FRAGMENT_LINK
         result_html = mirrordom.server.sanitise_document(from_html)
-        assert self.compare_html(to_html, result_html, clean=False)
+        assert self.compare_html(to_html, result_html, ignore_hrefs=False, clean=False)
 
 
 class TestFirefox(util.TestBrowserBase):

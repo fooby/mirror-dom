@@ -233,6 +233,9 @@ def augment_tree_defaults_for_ie(root):
     for element in root.iter():
         augment_single_node_defaults_for_ie(element)
 
+def strip_hrefs(doc):
+    doc.rewrite_links(lambda url: "")
+
 def strip_localhost_hrefs_for_ie(doc):
     # rewrite_links only defined on HtmlElement
     assert isinstance(doc, lxml.html.HtmlElement)
@@ -274,6 +277,7 @@ class TestBase(object):
             should_strip_localhost_hrefs_for_ie=True,
             should_remove_title_for_ie=True,
             strip_style_attributes=True,
+            ignore_hrefs=True,
             clean=False):
         """
         Yep, compare two target documents together
@@ -304,6 +308,9 @@ class TestBase(object):
         :param strip_style_attributes:
                         IE's style attributes are unworkable for comparison
 
+        :param ignore_hrefs:
+                        Strip HREFs out
+
         :param clean:   Try to perform some extra cleaning using the lxml html
                         Cleaner class to make the comparison less brittle.
         """
@@ -316,7 +323,10 @@ class TestBase(object):
             augment_tree_defaults_for_ie(want_doc)
             augment_tree_defaults_for_ie(got_doc)
 
-        if should_strip_localhost_hrefs_for_ie:
+        if ignore_hrefs:
+            strip_hrefs(want_doc)
+            strip_hrefs(got_doc)
+        elif should_strip_localhost_hrefs_for_ie:
             strip_localhost_hrefs_for_ie(want_doc)
             strip_localhost_hrefs_for_ie(got_doc)
 
@@ -327,6 +337,7 @@ class TestBase(object):
         if strip_style_attributes:
             lxml.etree.strip_attributes(want_doc, "style")
             lxml.etree.strip_attributes(got_doc, "style")
+
 
         if clean:
             cleaner = self.get_html_cleaner()
