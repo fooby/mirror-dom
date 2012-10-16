@@ -72,7 +72,7 @@ class TestServer(util.TestBase):
     <div>
       <input id="text_input" type="text" size="50" value="hello"></input>
     </div>
-    <a href="test_dom_sync_content2.html">Page 2</a>
+    <a>Page 2</a>
     <iframe name="theiframe" id="theiframe"> </iframe>
   </body>
 </html>
@@ -261,6 +261,26 @@ class TestServer(util.TestBase):
         to_html = self.SANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE
         result_html = mirrordom.server.sanitise_document(from_html)
         # html5parser mangles the input too much, disable it
+        assert self.compare_html(to_html, result_html, clean=False)
+
+    UNSANITARY_HTML_FRAGMENT_LINK = """
+        <div>
+            <a href="www.google.com.au">Google</a>
+            <a href="/blah">Blah</a>
+            <a href="#" onclick="do_something_evil();">Evil</a>
+        </div>"""
+
+    SANITARY_HTML_FRAGMENT_LINK = """
+        <div>
+            <a>Google</a>
+            <a>Blah</a>
+            <a>Evil</a>
+        </div>"""
+
+    def test_sanitise_links(self):
+        from_html = self.UNSANITARY_HTML_FRAGMENT_LINK
+        to_html = self.SANITARY_HTML_FRAGMENT_LINK
+        result_html = mirrordom.server.sanitise_document(from_html)
         assert self.compare_html(to_html, result_html, clean=False)
 
 

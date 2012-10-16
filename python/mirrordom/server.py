@@ -141,7 +141,9 @@ def _get_html_cleaner():
     # Hmm...we want to keep SVG tags
     cleaner.remove_unknown_tags = False
 
-    # If True, the cleaner will wipe out <link> elements
+    # If True, the cleaner will wipe out <link> elements. We do want to clean
+    # javascript but we can't use the cleaner's handling, so we'll have to do
+    # our own javascript cleaning later on.
     cleaner.javascript = False
     return cleaner
 
@@ -238,6 +240,22 @@ def sanitise_document(html, return_etree=False, use_html5lib=False):
             iframe.attrib.pop("src")
         except KeyError:
             pass
+
+    # Find anchors and strip hrefs        
+    for anchor in final_html_tree.iter('a'):
+        try:
+            anchor.attrib.pop("href")
+        except KeyError:
+            pass
+
+    # Strip javascript (copied from lxml.html.clean.Cleaner code, but that does
+    # more than we want)
+    # safe_attrs handles events attributes itself
+    for el in final_html_tree.iter():
+        attrib = el.attrib
+        for aname in attrib.keys():
+            if aname.startswith('on'):
+                del attrib[aname]
 
     if return_etree:
         return final_html_tree
