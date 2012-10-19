@@ -169,7 +169,7 @@ def sanitise_node_diff(diff):
     diff[3] = sanitise_html_fragment(diff[3])
 
 def sanitise_html_fragment(html):
-    doc = sanitise_document(html, return_etree=True, use_html5lib=False)
+    doc = sanitise_document(html, return_etree=True, use_html5lib=False, is_fragment=True)
     return lxml.etree.tostring(doc)
 
 def force_insert_tbody(html_tree):
@@ -198,7 +198,7 @@ def force_insert_tbody(html_tree):
                 tbody.append(c)
     return html_tree
 
-def sanitise_document(html, return_etree=False, use_html5lib=False):
+def sanitise_document(html, return_etree=False, use_html5lib=False, is_fragment=False):
     """
     Strip out nasties such as <meta>, <script> and other useless bits of
     information.
@@ -213,6 +213,15 @@ def sanitise_document(html, return_etree=False, use_html5lib=False):
                                 but wreaks havoc when parsing fragments of HTML
                                 (i.e. it basically expects to parse an entire
                                 document)
+
+    :param is_fragment:         Whether we're doing a fragment of the HTML document.
+                                This is important, because lxml -> libxml2 does
+                                some really bad automatic wrapping of elements
+                                with <html><body>...</body></html> which we can't disable
+                                as we have no way of sending
+                                HTML_PARSE_NOIMPLIED through to the libxml2
+                                parser. So we'll manually remove the wrapping
+                                elements afterwards.
     """
     global HTML5LIB_INSTALLED
     if use_html5lib and HTML5LIB_INSTALLED:
@@ -228,7 +237,14 @@ def sanitise_document(html, return_etree=False, use_html5lib=False):
         temp = lxml.html.tostring(html_tree)
         final_html_tree = lxml.html.fromstring(temp)
     else:
-        final_html_tree = lxml.html.fromstring(html)
+        if is_fragment:
+            try:
+                final_html_tree = lxml.html.fragment_fromstring(html)
+            except lxml.etree.ParserError:
+                final_html_tree = lxml.html.fromstring(html)
+        else:
+            final_html_tree = lxml.html.fromstring(html)
+
         force_insert_tbody(final_html_tree)
 
     cleaner = _get_html_cleaner()

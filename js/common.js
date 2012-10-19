@@ -88,7 +88,6 @@ MirrorDom.Util.get_document_object_from_iframe = function(iframe) {
 // Node processing
 // ============================================================================
 
-
 /**
  * Checks whether we should ignore the node when building the tree
  */
@@ -99,7 +98,6 @@ MirrorDom.Util.should_ignore_node = function(node) {
             var has_content = /\S/.test(node.nodeValue);
             return !has_content;
 
-                    
         case 1: //case Node.ELEMENT_NODE:
             // Ignore certain element tags 
             switch (node.nodeName) {
@@ -263,6 +261,106 @@ MirrorDom.Util.get_node_doc_type = function(node) {
     }
 }
 
+// ============================================================================
+// XML
+// ============================================================================
+/**
+ * We've parsed
+ *
+ * @param doc           Document to which the copy belongs
+ * @param root          XML node
+ */
+MirrorDom.Util.copy_xml_node_to_dom = function(doc, root) {
+    function copy_node(node) {
+        switch (node.nodeType) {
+            case 1:
+                var elem = doc.createElement(node.tagName);
+                for (var i = 0; i < node.attributes.length; i++) {
+                    var attrib = node.attributes[i];
+                    elem.setAttribute(attrib.name, attrib.value);
+                }
+                return elem;
+            case 3:
+                var text = doc.createTextNode(node.textContent);
+                return text;
+            default:
+                // hmm
+        }
+    }
+
+    function append_child(parent_node, child_node) {
+        try {
+            parent_node.appendChild(child_node);
+            return true;
+        } catch (e) {
+            // IE8 HACK: appendChild on <style> or <script> elements don't work...
+            // Unexpected call to method or property access
+            if (e.number == -2147418113 && (parent_node.nodeName == 'SCRIPT' || parent_node.nodeName == 'STYLE')) {
+                // We'll just skip this bit I guess
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    return MirrorDom.Util.copy_dom_node_tree(doc, root, copy_node, append_child);
+}
+
+MirrorDom.Util.copy_dom_node_tree = function(doc, root, copy_func, append_child_func) {
+    var node = root;
+    var out_root = copy_func(root);
+    var out_node = out_root;
+
+    if (append_child_func == undefined) {
+        append_child_func = function(p, c) {
+            p.appendChild(c);
+            return true;
+        }
+    }
+
+    // This is similar to broadcaster's clone node, actually
+    while (true) {
+
+        if (node.firstChild) {
+            var child = copy_func(node.firstChild);
+            var success = append_child_func(out_node, child);
+
+            // Hack because in IE8, some elements don't allow appendChild.
+            if (success) {
+                node = node.firstChild;
+                out_node = child;
+            } else {
+                // Welp, error condition
+                break;
+            }
+
+        } else if (node === root) {
+            return out_root;
+        } else if (node.nextSibling) {
+            var sibling = copy_func(node.nextSibling);
+            append_child_func(out_node.parentNode, sibling);
+            node = node.nextSibling;
+            out_node = sibling;
+        } else {
+            while (!node.nextSibling) {
+                node = node.parentNode;
+                out_node = out_node.parentNode;
+
+                if (node === root) {
+                    return out_root;
+                }
+            }
+
+            var sibling = copy_func(node.nextSibling);
+            append_child_func(out_node.parentNode, sibling);
+            node = node.nextSibling;
+            out_node = sibling;
+        }
+    }
+
+    // unreachable except in error condition
+    return out_root;
+};
 
 // ============================================================================
 // SVG
@@ -280,86 +378,27 @@ MirrorDom.Util.to_svg = function(svg_doc, node_xml) {
     var parser = new DOMParser();
     var parsed_svg = parser.parseFromString(node_xml, "image/svg+xml");
     var d = svg_doc || document; // Note: Using document ONLY works if node_xml contains the entire SVG docoument
-
     function copy_svg_node(node) {
-
         switch (node.nodeType) {
-
             case 1:
                 var elem = d.createElementNS(MirrorDom.Util.SVG_NAMESPACE, node.tagName);
                 for (var i = 0; i < node.attributes.length; i++) {
                     var attrib = node.attributes[i];
-                    // FIX
-                    //elem.setAttributeNS(MirrorDom.Util.SVG_NAMESPACE);
                     var ns = attrib.namespaceURI || null;
-                    //var ns = attrib.namespaceURI;
                     elem.setAttributeNS(ns, attrib.name, attrib.value);
                 }
                 return elem;
             case 3:
                 var text = d.createTextNode(node.textContent);
                 return text;
-
             default:
                 // hmm
         }
-
     }
 
-    var root = parsed_svg.documentElement;
-    var node = root;
-    var out_root = copy_svg_node(root);
-    var out_node = out_root;
-
-    // This is similar to broadcaster's clone node, actually
-    while (node) {
-        if (node.firstChild) {
-            var child = copy_svg_node(node.firstChild);
-            out_node.appendChild(child);
-            node = node.firstChild;
-            out_node = child;
-            continue;
-        } else if (node.nextSibling) {
-            var sibling = copy_svg_node(node.nextSibling);
-            out_node.parentNode.appendChild(sibling);
-            node = node.nextSibling;
-            out_node = sibling;
-        } else {
-            while (!node.nextSibling) {
-                if (node === root) {
-                    return out_root;
-                }
-                node = node.parentNode;
-                out_node = out_node.parentNode;
-            }
-
-            var sibling = copy_svg_node(node.nextSibling);
-            out_node.parentNode.appendChild(sibling);
-            node = node.nextSibling;
-            out_node = sibling;
-    }
-
-    // unreachable
-    return null;
-};
-
-/**
- * Extract relevant data from the node
- */
-MirrorDom.Broadcaster.prototype.clone_node = function(node, include_properties) {
-    // deep copy.
-    var clone = {
-        'attributes': {},
-        'nodeName':   node.nodeName,
-        'nodeType':   node.nodeType,
-        'nodeValue':  node.nodeValue,
-        'namespaceURI':  node.namespaceURI
-    };
-
-    if (node.attributes) {
-        }
-    }
+    return MirrorDom.Util.copy_dom_node_tree(d, parsed_svg.documentElement, copy_svg_node);
 }
+
 
 
 /**

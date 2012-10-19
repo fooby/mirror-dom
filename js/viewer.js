@@ -353,6 +353,7 @@ MirrorDom.Viewer.prototype.copy_to_node = function(xml_node, dest, use_innerhtml
         for (var i = 0; i < children.length; i++) {
             var new_node = children[i];
             var new_xml  = this.xml_to_string(new_node);
+
             inner_html.push(new_xml);
         }
         dest.html(inner_html.join(""));
@@ -360,10 +361,16 @@ MirrorDom.Viewer.prototype.copy_to_node = function(xml_node, dest, use_innerhtml
     else {
         for (var i = 0; i < children.length; i++) {
             var new_node = children[i];
-            var xml_string = this.xml_to_string(new_node);
+            var dom_node = MirrorDom.Util.copy_xml_node_to_dom(dest[0].ownerDocument, new_node);
+            // Comment nodes don't get copied
+            if (dom_node != null) {
+                dest[0].appendChild(dom_node);
+            }
+
+            //var xml_string = this.xml_to_string(new_node);
             // TODO...can we just chuck the node straight in without converting
             // back to a string?
-            dest.append(xml_string);
+            //dest.append(xml_string);
         }
     }
 }
@@ -390,11 +397,7 @@ MirrorDom.Viewer.prototype.apply_document = function(doc_elem, data) {
         throw new Error("Could not find <body> element in viewer document.");
     }
 
-    // Remove the body (previous we just emptied it, but this seems to have
-    // body.height() issues in Firefox)
     current_body = jQuery(current_body).empty();
-    /*jQuery(current_body).remove();
-    current_body = jQuery("<body>").appendTo(doc_elem);*/
     var new_body_node = new_doc.find("body");
     this.copy_to_node(new_body_node, current_body, true);
 
@@ -409,6 +412,9 @@ MirrorDom.Viewer.prototype.apply_document = function(doc_elem, data) {
         this.log("Found " + links.length + " link nodes");
         this.copy_to_node(new_head_node, current_head, false);
         this.log("Stylesheets after: " + doc_object.styleSheets.length);
+
+        // TODO: If we find <style> elements with custom CSS, I don't think it
+        // works. A hack will need to be found.
     }
 }
 

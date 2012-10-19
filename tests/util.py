@@ -397,8 +397,8 @@ class TestBrowserBase(TestBase):
     def _get_webdriver(cls):
         if cls._webdriver is None:
             cls._webdriver = cls._create_webdriver()
-            print "Starting webdriver %s!" % (cls._webdriver)
         assert cls._webdriver
+        print "Using webdriver %s!" % (cls._webdriver)
         return cls._webdriver
 
 

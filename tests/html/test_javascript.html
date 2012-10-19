@@ -23,7 +23,8 @@
 
           viewer = new MirrorDom.Viewer({
               iframe: viewer_iframe,
-              blank_page: "blank.html"
+              blank_page: "blank.html",
+              debug: true
           });
       });
 
@@ -40,6 +41,7 @@
       // Test 2: Test apply html
       // ------------------------------------------
       function test_2_apply_document(result) {
+          //debugger;
           var doc_elem = viewer.get_document_element();
           viewer.apply_document(doc_elem, result); 
       }

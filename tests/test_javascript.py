@@ -6,6 +6,7 @@ import json
 import os
 import time
 
+import nose.plugins.skip
 from selenium.common.exceptions import NoSuchElementException
 
 import util
@@ -60,11 +61,13 @@ class TestFirefox(util.TestBrowserBase):
     TEST_APPLY_DOCUMENT = """\
     <html>
       <head>
+        <title>Blah</title>
         <meta content="text/html; charset=utf-8" http-equiv="Content-Type"></meta>
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js" type="text/javascript"></script>
         <script type="text/javascript"></script>
-        <style type="text/css">table { border-collapse: collapse; }
-        table,th,td { border: 1px solid black; }</style>
+        <!-- Style element can't be modified in IE8, this is now in a separate test -->
+        <!--style type="text/css">table { border-collapse: collapse; }
+        table,th,td { border: 1px solid black; }</style-->
       </head>
       <body>
         <h3>Hallow world!</h3>
@@ -102,6 +105,8 @@ class TestFirefox(util.TestBrowserBase):
         viewer_html = self.webdriver.execute_script("return get_viewer_html()")
         # Internet explorer values contain windows line endings
         viewer_html = viewer_html.replace('\r\n', '\n')
+
+        print desired_html
         assert self.compare_html(desired_html, viewer_html, clean=True)
 
     def test_get_diff_add_node(self):
@@ -359,12 +364,44 @@ class TestFirefox(util.TestBrowserBase):
         text_2 = self.webdriver.execute_script("""return test_16_broadcaster_get_text_at_path([1,1,2])""")
         assert text_2.strip() == "".join(text_nodes)
 
+    # Note that I've deliberately omitted <tbody> from the table element, as I
+    # want to see what sort of complications ensue
+    TEST_APPLY_DOCUMENT_WITH_STYLE_ELEMENT = """\
+    <html>
+      <head>
+        <title>Blah</title>
+        <style type="text/css"> body { color: red; } </style>
+      </head>
+      <body>
+        helo
+      </body>
+    </html>"""
+
+    def test_apply_document_with_style_element(self):
+        """ Test 17: Some browsers don't like dynamically created <style>
+        elements (i.e. IE8) """
+        self.init_webdriver()
+        desired_html = self.TEST_APPLY_DOCUMENT_WITH_STYLE_ELEMENT
+        self.webdriver.execute_script("test_2_apply_document(arguments[0])", desired_html)
+        viewer_html = self.webdriver.execute_script("return get_viewer_html()")
+        # Internet explorer values contain windows line endings
+        viewer_html = viewer_html.replace('\r\n', '\n')
+        print desired_html
+        assert self.compare_html(desired_html, viewer_html, clean=True)
 
 class TestIE(TestFirefox):
 
     @classmethod
     def _create_webdriver(cls):
         return util.get_debug_ie_webdriver()
+
+    def test_apply_document_with_style_element(self):
+        # I want to run the test, but ignore failure because we're expecting it
+        try:
+            return super(TestIE, self).test_apply_document_with_style_element(self)
+        except:
+            # Hmm...
+            raise nose.plugins.skip.SkipTest("IE can't modify style elements")
 
 class TestChrome(TestFirefox):
     @classmethod
