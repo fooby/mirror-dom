@@ -36,21 +36,85 @@ MirrorDom.Util.process_property_paths = function(prop_domains) {
 
 MirrorDom.Util.PROPERTY_NAMES = {
     "html": ["disabled", "value", "checked", "style.cssText", "className", "colSpan"],
-    "svg":  []
+    "svg":  [],
+    "vml":  ["style.cssText", "runtimeStyle.cssText", "path.v", "strokeColor.value", "strokeweight"]
 };
+
+/**
+ * If any properties are in this list, they will only be considered for the
+ * listed tags.
+ */
+MirrorDom.Util.PROPERTY_RESTRICT = {
+    "html": { "colSpan": ["td", "th"] },
+    "vml":  { "path.v":  ["shape"] }
+}
 
 MirrorDom.Util.IGNORE_ATTRIBS = {"style": null};
 MirrorDom.Util.PROPERTY_LOOKUP = MirrorDom.Util.process_property_paths(MirrorDom.Util.PROPERTY_NAMES);
 
+// Cache of doc_type -> tag_name -< lookup
+MirrorDom.Util.PROPERTY_LOOKUP_CACHE = {};
+
 /**
- * @param node      
+ * Returns a property lookup list for a given node.
+ *
+ * @returns     Array of [property_key, [property_key_component_lookup]]
+ *
+ * e.g. [["style.cssText", ["style", "cssText"]], ["disabled", "disabled"]]
+ *
+ * The property_key can be used for storing in a flat dictionary, while the
+ * property_key_component_lookup allows to descend through nested objects to
+ * retrieve/set the value.
  */
 MirrorDom.Util.get_property_lookup_list = function(node) {
-    if (node.namespaceURI == MirrorDom.Util.SVG_NAMESPACE) {
-        return MirrorDom.Util.PROPERTY_LOOKUP["svg"];
-    } else {
-        return MirrorDom.Util.PROPERTY_LOOKUP["html"];
+    var doc_type = MirrorDom.Util.get_node_doc_type(node);
+
+    // Check cache
+    if (MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type] && 
+            MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][node.tagName]) {
+        return MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][node.tagName];
     }
+
+    // Begin generate new filtired lookup list
+    var lookup = MirrorDom.Util.PROPERTY_LOOKUP[doc_type];
+    if (lookup == undefined) {
+        throw new Error("Got unexpected doctype for property lookup: " + doc_type);
+    }
+
+    // No restrictions for this doctype
+    var doc_restrict = MirrorDom.Util.PROPERTY_RESTRICT[doc_type];
+    if (doc_restrict == undefined) {
+        return lookup;
+    }
+
+    // Do the filtering
+    var filtered_lookup = [];
+    for (var i = 0; i < lookup.length; i++) {
+        var lookup_text = lookup[i][0];
+
+        if (lookup_text in doc_restrict) {
+            // This property has an entry in the restriction list, we need to
+            // verify if our tag can use it
+            var tag_list = doc_restrict[lookup_text];
+            for (j = 0; j < tag_list.length; j++) {
+                if (tag_list[j] == node.tagName) {
+                    filtered_lookup.push(lookup[i]);
+                    break;
+                }
+            }
+        } else {
+            // Property doesn't have a restriction list, add it
+            filtered_lookup.push(lookup[i]);
+        }
+    }
+
+    // Add to cache
+    if (!(doc_type in MirrorDom.Util.PROPERTY_LOOKUP_CACHE)) {
+        MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type] = {};
+    }
+    MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][node.tagName] = filtered_lookup;
+
+    return filtered_lookup;
 }
 
 // ============================================================================
@@ -244,6 +308,7 @@ MirrorDom.Util.get_property = function(node, prop_lookup) {
 
 MirrorDom.Util.HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 MirrorDom.Util.SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+MirrorDom.Util.VML_NAMESPACE = "urn:schemas-microsoft-com:vml";
 
 /**
  * "HTML"
@@ -257,6 +322,15 @@ MirrorDom.Util.get_node_doc_type = function(node) {
         case MirrorDom.Util.SVG_NAMESPACE:
             return "svg";
         default:
+            // VML hack, sigh
+            
+            // .xmlns seems to be defined with inline xmlns attribute.
+            // .tagUrn seems to be defined with namespace prefix
+            if ((n.xmlns != undefined && n.xmlns == MirrorDom.Util.VML_NAMESPACE) ||
+                (n.tagUrn != undefined && n.tagUrn == MirrorDom.Util.VML_NAMESPACE)) {
+                return "vml";
+            }
+
             return "html";
     }
 }

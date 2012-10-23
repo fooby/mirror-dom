@@ -353,6 +353,9 @@ class TestBase(object):
                     got_doc_string, 0)
         return result
 
+class JavascriptFailed(Exception):
+    pass
+
 class TestBrowserBase(TestBase):
 
     # File to initialise the browser with
@@ -407,6 +410,32 @@ class TestBrowserBase(TestBase):
         self.webdriver = self._get_webdriver()
         url = self.get_html_url(self.HTML_FILE)
         self.webdriver.get(url)
+
+    def execute_script(self, script, *args):
+        """
+        This seems to be working to get some non-nonsensical error feedback.
+
+        TODO: Move tests to use this instead of self.webdriver.execute_script
+        """
+        wrapped_script = """\
+            function _wrappa_() {
+                %s
+            };
+            var result;
+            try {
+                result = _wrappa_.apply(this, arguments);
+                result = [true, result];
+            } catch (e) {
+                result = [false, e.message];
+            }
+            return result;
+        """ % (script)
+        result = self.webdriver.execute_script(wrapped_script, *args)
+        success, value = result
+        if not success:
+            raise JavascriptFailed(value)
+        else:
+            return value
 
     def get_html_url(self, f):
         # Assumes file is in html/ directory 

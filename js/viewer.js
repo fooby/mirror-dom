@@ -130,7 +130,7 @@ MirrorDom.Viewer.prototype.poll = function() {
  */
 MirrorDom.Viewer.prototype.receive_updates = function(result) {
     if (result["changesets"] == undefined) {
-        this.log("No changeset returned (this should only happen in error recovery mode)");
+        //this.log("No changeset returned (this should only happen in error recovery mode)");
         return;
     }
 
@@ -485,6 +485,10 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
                         parent.appendChild(new_elem);
                         break;
                     case "html":
+                    case "vml": // Sigh...
+                        // VML seems to work with jQuery, I guess that's expected
+                        // as it works by dumping into innerHTML
+
                         var new_elem = jQuery(diff[3])[0];
                         parent.appendChild(new_elem);
 

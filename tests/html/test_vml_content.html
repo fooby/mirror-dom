@@ -1,0 +1,93 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=EmulateIE8" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>helo</title>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript">
+
+        jQuery(document).ready(function() {
+            /*document.namespaces.add('v', 'urn:schemas-microsoft-com:vml');
+            document.createStyleSheet().cssText =
+              'hcv\\:fill, hcv\\:path, hcv\\:shape, hcv\\:stroke' +
+            '{ behavior:url(#default#VML); display: inline-block; } ';*/
+
+            //debugger;
+            //var x = make_vml("oval", {'left': '20px', 'top': '30px', 'width': '20px', 'height': '150px'}, {'fillcolor': 'yellow'});
+            //add_vml_node(x);
+
+            //jQuery("#ie_version").text("Browser: " + navigator.userAgent);
+            //try {
+            //    var x = make_vml("oval", {'left': '20px', 'top': '30px', 'width': '20px', 'height': '150px'}, {'fillcolor': 'yellow'});
+            //    jQuery("#create_test").text("Creating VML worked!");
+            //} catch(e) {
+            //    jQuery("#create_test").text("Creating VML failed with: " + e);
+            //}
+        });
+
+
+        /**
+         * Super hack as we can't seem to set properties in VML elements,
+         * so now we're going to use a highcharts style unofficial createElement hack.
+         *
+         * See http://louisremi.com/2009/03/30/changes-in-vml-for-ie8-or-what-feature-can-the-ie-dev-team-break-for-you-today/
+         */
+        function make_vml(tag, style, attributes) {
+            var style_value = [];
+            for (s in style) {
+                style_value.push(s + ":" + style[s]); 
+            }
+            style_value.push("behavior:url(#default#VML)");
+            style_value.push("position:absolute");
+
+            var xmlns = ' xmlns="urn:schemas-microsoft-com:vml"';
+            var style = [' style="', style_value.join(";"), '" '].join("");
+            var attr_values = [];
+            for (a in attributes) {
+                attr_values.push([a, '="', attributes[a], '"'].join(""));
+            }
+            var final_attrs = attr_values.join(" ");
+            var final_tag = ['<', tag, xmlns, style, final_attrs, '/>'].join("");
+            var el = document.createElement(final_tag);
+            return el;
+        }
+
+        document.namespaces.add('v', 'urn:schemas-microsoft-com:vml', "#default#VML");
+        document.createStyleSheet().cssText = 'hcv\\:fill, hcv\\:path, hcv\\:shape, hcv\\:stroke{ behavior:url(#default#VML); display: inline-block; } ';
+    </script>
+  </head>
+  <body>
+    <h1>VML test</h1>
+    <div id="thevml" style="position: relative;">
+      <v:rect style="width: 100px; height: 100px; left: 10px; top: 10px; position: absolute;" fillcolor="blue" strokecolor="red"></v:rect>
+      <span style="left: 0px; top: 105px; position: absolute; color: red;">
+        VML text box
+      </span>
+      <v:line from="0,0" to="10,110" strokecolor="#00ff00" strokeweight="2px" style="position: absolute;">
+        <v:stroke dashstyle="solid"/>
+      </v:line>
+
+      <v:shape id="theshape" fillcolor="yellow" coordorigin="0 0"
+               coordsize="10 10" strokecolor="green" strokeweight="1pt"
+               style="position: absolute; top:0px;left:0px;width:1px;height:1px"
+               path="wa 2018 408 4493 2883 3893 585 2572 2677 at 3255 1645 3255 1645 3255 1645 3255 1645 x e">
+               </v:shape>
+
+      <!--v:shape strokecolor="red" fillcolor="green"
+         coordorigin="0 0" coordsize="200 200"
+         style="position: absolute; top:200px; left:100px; width:50px; height:50px"
+         path ="m 1,1 l 1,200, 200,200, 200,1 x e">
+         </v:shape-->
+
+
+    </div>
+    <!-- THIS MUST BE THE THIRD DIV -->
+    <div id="third_div">
+      <!-- THIS MUST BE THE ONLY NODE IN THIS DIV --> 
+      <oval id="deletemeoval" xmlns="urn:schemas-microsoft-com:vml" style="behavior:url(#default#VML); left: 20px; top: 150px; width:100px; height:100px; position: absolute;" fillcolor="green"></oval>
+    </div>
+    <div id="ie_version"></div>
+    <div id="create_test"></div>
+  </body>
+</html>
