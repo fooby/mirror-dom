@@ -42,7 +42,7 @@ MirrorDom.Util.PROPERTY_NAMES = {
 
 /**
  * If any properties are in this list, they will only be considered for the
- * listed tags.
+ * listed tags. Tags must be in lower case!
  */
 MirrorDom.Util.PROPERTY_RESTRICT = {
     "html": { "colSpan": ["td", "th"] },
@@ -67,12 +67,18 @@ MirrorDom.Util.PROPERTY_LOOKUP_CACHE = {};
  * retrieve/set the value.
  */
 MirrorDom.Util.get_property_lookup_list = function(node) {
+    // Only interested in Element node properties
+    if (node.nodeType != 1) {
+        return [];
+    }
+
     var doc_type = MirrorDom.Util.get_node_doc_type(node);
+    var tag_name = node.tagName.toLowerCase();
 
     // Check cache
     if (MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type] && 
-            MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][node.tagName]) {
-        return MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][node.tagName];
+            MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][tag_name]) {
+        return MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][tag_name];
     }
 
     // Begin generate new filtired lookup list
@@ -97,7 +103,7 @@ MirrorDom.Util.get_property_lookup_list = function(node) {
             // verify if our tag can use it
             var tag_list = doc_restrict[lookup_text];
             for (j = 0; j < tag_list.length; j++) {
-                if (tag_list[j] == node.tagName) {
+                if (tag_list[j] == tag_name) {
                     filtered_lookup.push(lookup[i]);
                     break;
                 }
@@ -112,7 +118,7 @@ MirrorDom.Util.get_property_lookup_list = function(node) {
     if (!(doc_type in MirrorDom.Util.PROPERTY_LOOKUP_CACHE)) {
         MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type] = {};
     }
-    MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][node.tagName] = filtered_lookup;
+    MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][tag_name] = filtered_lookup;
 
     return filtered_lookup;
 }
@@ -159,7 +165,11 @@ MirrorDom.Util.should_ignore_node = function(node) {
     switch (node.nodeType) {
         case 3: // case Node.TEXT_NODE:
             // Ignore if text node is only whitespace
-            var has_content = /\S/.test(node.nodeValue);
+
+            // OMG IE8 treats nonbreaking spaces as non-whitespace
+            // whereas IE9, Firefox and Chrome etc. don't. IE8, die
+            //var has_content = /\S/.test(node.nodeValue);
+            var has_content = /[\S\u00a0]/.test(node.nodeValue);
             return !has_content;
 
         case 1: //case Node.ELEMENT_NODE:
@@ -167,6 +177,7 @@ MirrorDom.Util.should_ignore_node = function(node) {
             switch (node.nodeName) {
                 case "META":
                 case "SCRIPT":
+                case "TITLE":
                     return true;
                 default:
                     return false;
@@ -569,11 +580,13 @@ MirrorDom.Util.node_at_path = function(root, ipath) {
     for (var i=0; i < ipath.length; i++) {
         node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
         if (node == null) {
+            //debugger;
             throw new MirrorDom.Util.PathError(root, ipath);
         }
         for (var j=0; j < ipath[i]; j++) {
             node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
             if (node == null) {
+                //debugger;
                 throw new MirrorDom.Util.PathError(root, ipath);
             }
         }

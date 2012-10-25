@@ -429,6 +429,7 @@ MirrorDom.Viewer.prototype.apply_document = function(doc_elem, data) {
 MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
     if (node == null) { node = this.get_document_element(); }
     var root = node;
+    var doc = root.ownerDocument;
 
     for (var i=0; i < diffs.length; i++) {
         var diff = diffs[i];        
@@ -480,16 +481,14 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
                 switch (node_type) {
                     case "svg":
                         // TODO: Manage the situation when node corresponds to entire XML doc
-                        var svg_doc = parent.ownerDocument;
-                        var new_elem = MirrorDom.Util.to_svg(svg_doc, diff[3]);
+                        var new_elem = MirrorDom.Util.to_svg(doc, diff[3]);
                         parent.appendChild(new_elem);
                         break;
                     case "html":
                     case "vml": // Sigh...
                         // VML seems to work with jQuery, I guess that's expected
                         // as it works by dumping into innerHTML
-
-                        var new_elem = jQuery(diff[3])[0];
+                        var new_elem = jQuery(diff[3], doc)[0];
                         parent.appendChild(new_elem);
 
                         // Apply all properties which doesn't get transmitted in
@@ -505,7 +504,7 @@ MirrorDom.Viewer.prototype.apply_diffs = function(node, diffs, index) {
                         break;
                 }
             } else {
-                var new_elem = document.createTextNode(diff[3]);
+                var new_elem = doc.createTextNode(diff[3]);
                 parent.appendChild(new_elem);
             }
 

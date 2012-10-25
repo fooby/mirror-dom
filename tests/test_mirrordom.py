@@ -37,6 +37,7 @@ class TestServer(util.TestBase):
     UNSANITARY_HTML = """\
 <html>
   <head>
+    <title>RemoveMe</title>
     <!-- Random comment -->
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>

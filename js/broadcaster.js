@@ -725,12 +725,12 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
  * Note: When this is called, the node and ALL siblings to the right have been
  * deleted.
  *
- * @param cnode         Node cloned in clone_node() (not an actual DOM node)
+ * @param cnode             Node cloned in clone_node() (not an actual DOM node)
  */
 MirrorDom.Broadcaster.prototype.handle_diff_delete_nodes = function(diffs, ipath, cnode) {
     var type = MirrorDom.Util.get_node_doc_type(cnode); // html or svg
     diffs.push(['deleted', type, ipath.slice()]);
-
+    //diffs.push(['deleted', type, ipath.slice(), cnode.nodeName, cnode.nodeValue]);
     ipath = ipath.slice();
     // Scan for iframes which have been deleted
     while (cnode) {
@@ -898,6 +898,12 @@ MirrorDom.DomIterator = function(root, base_ipath) {
  */
 MirrorDom.DomIterator.prototype.attach_handler = function(handler, data) {
     this.handlers.push([handler, data]);
+}
+
+MirrorDom.DomIterator.prototype.log = function(msg) {
+    if (window.console && console.log) {
+        console.log(msg); 
+    }
 }
 
 /**

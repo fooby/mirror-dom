@@ -128,23 +128,30 @@ class Changelog(object):
             }
 
 def _get_html_cleaner():
-    cleaner = lxml.html.clean.Cleaner()
-    cleaner.frames = False
-    cleaner.links = False
-    cleaner.forms = False
-    cleaner.style = False
-    cleaner.page_structure = False
-    cleaner.scripts = True
-    cleaner.embedded = False
-    cleaner.safe_attrs_only = False
+    cleaner = lxml.html.clean.Cleaner(
+        frames = False,
+        links = False,
+        forms = False,
+        style = False,
+        page_structure = False,
+        scripts = True,
+        embedded = False,
+        safe_attrs_only = False,
 
-    # Hmm...we want to keep SVG tags
+        # Setting title elements have some issues in IE
+        kill_tags = ['title'],
+
+        # Hmm...we want to keep SVG and VML tags
+        remove_unknown_tags = False,
+
+        # If True, the cleaner will wipe out <link> elements. We do want to clean
+        # javascript but we can't use the cleaner's handling, so we'll have to do
+        # our own javascript cleaning later on.
+        javascript = False,
+    )
+
     cleaner.remove_unknown_tags = False
 
-    # If True, the cleaner will wipe out <link> elements. We do want to clean
-    # javascript but we can't use the cleaner's handling, so we'll have to do
-    # our own javascript cleaning later on.
-    cleaner.javascript = False
     return cleaner
 
 def sanitise_diffs(diffs):
