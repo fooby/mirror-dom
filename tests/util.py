@@ -152,9 +152,10 @@ def get_debug_firefox_webdriver():
 
 def get_debug_ie_webdriver():
     print "Starting IE webdriver"
-    ie_log = get_relative_path("logs", "ie.log")
-    log_level = "DEBUG"
-    return webdriver.Ie(log_level=log_level, log_file=ie_log)
+    #ie_log = get_relative_path("logs", "ie.log")
+    #log_level = "DEBUG"
+    #return webdriver.Ie(log_level=log_level, log_file=ie_log)
+    return webdriver.Ie()
 
 def get_debug_chrome_webdriver():
     print "Starting chrome webdriver"

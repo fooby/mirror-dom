@@ -384,7 +384,8 @@ class TestFirefox(util.TestBrowserBase):
         assert input_value.endswith(new_input_value)
         table = self.webdriver.find_element_by_id('thetable')
         table_background_colour = input.value_of_css_property("background-color")
-        assert table_background_colour in ("purple", "rgba(255, 255, 255, 1)")
+        table_background_colour = table_background_colour.replace(" ", "")
+        assert table_background_colour in ("purple", "rgba(255,255,255,1)")
 
     def test_link_stylesheet_transfer(self):
         """
