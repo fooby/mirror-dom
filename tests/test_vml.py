@@ -56,7 +56,7 @@ class TestIE(util.TestBrowserBase):
         """ Test 1: Get VML stuff """
         self.init_webdriver()
         html = self.execute_script("""
-          var data = broadcaster.start_full_document();
+          var data = broadcaster.start_document();
           return data["html"];
         """)
         assert "<line" in html or "<v:line" in html
@@ -118,7 +118,7 @@ class TestIE(util.TestBrowserBase):
         assert len(diffs) == 1
 
         print diffs
-        diff_type, node_type, path, svg_xml, props = diffs[0]
+        diff_type, node_type, path, svg_xml, tail_text, props = diffs[0]
         assert "oval" in svg_xml
         assert node_type == "vml"
         assert diff_type == "node"
@@ -132,7 +132,9 @@ class TestIE(util.TestBrowserBase):
 
         # This diffs mangles the entire VML document, but it gets the circle in there!
         diff = [[u'node', u'vml', [1, 1, 0],
-            u'<oval style="POSITION: absolute; WIDTH: 90; HEIGHT: 90; BEHAVIOR: url(#default#VML); TOP: 11px; LEFT: 12px" xmlns="urn:schemas-microsoft-com:vml" coordsize = "21600,21600" fillcolor = "yellow"></oval>', [[u'vml', [], {u'runtimeStyle.cssText': u'WIDTH: 31.5pt; HEIGHT: 31.5pt; TOP: 29px; LEFT: 99px', u'style.cssText': u'POSITION: absolute; WIDTH: 40px; HEIGHT: 40px; BEHAVIOR: url(#default#VML); TOP: 30px; LEFT: 100px'}]]]]
+            u'<oval style="POSITION: absolute; WIDTH: 90; HEIGHT: 90; BEHAVIOR: url(#default#VML); TOP: 11px; LEFT: 12px" xmlns="urn:schemas-microsoft-com:vml" coordsize = "21600,21600" fillcolor = "yellow"></oval>',
+            u'tail text',
+            [[u'vml', [], {u'runtimeStyle.cssText': u'WIDTH: 31.5pt; HEIGHT: 31.5pt; TOP: 29px; LEFT: 99px', u'style.cssText': u'POSITION: absolute; WIDTH: 40px; HEIGHT: 40px; BEHAVIOR: url(#default#VML); TOP: 30px; LEFT: 100px'}]]]]
 
         self.execute_script("""
           apply_viewer_diffs(arguments[0]);

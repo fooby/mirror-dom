@@ -1,285 +1,118 @@
 var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
-MirrorDom.Util = {}
-
-
 // ============================================================================
-// Property handling
+// Misc
 // ============================================================================
+
 /**
- * Split property path by "." (purely for style.cssText's benefit)
- *
- * Returns a dictionary of {domain: [(original path, [list of path elements])]}
- *
- * e.g. The if prop_paths is ["style.cssText"], the return value is
- *      [["style.cssText", ["style", "cssText"]]]
+ * Convert array to object for fast hashmap lookup
  */
-MirrorDom.Util.process_property_paths = function(prop_domains) {
-     var result = {};
-
-    for (domain in prop_domains) {
-        // svg or html
-        var prop_paths = prop_domains[domain];
-
-        // pre-split the property lookups
-        var prop_names = [];
-        for (var i = 0; i < prop_paths.length; i++) {
-            var prop_text = prop_paths[i];
-            prop_names.push([prop_text, prop_text.split('.')]);
-        }
-        
-        result[domain] = prop_names;
-    }
-
+MirrorDom.to_set = function(x) {
+    var result = {};
+    for (var i = 0; i < x.length; i++) { result[x[i]] = null; }
     return result;
-}
-
-MirrorDom.Util.PROPERTY_NAMES = {
-    "html": ["disabled", "value", "checked", "style.cssText", "className", "colSpan"],
-    "svg":  [],
-    "vml":  ["style.cssText", "runtimeStyle.cssText", "path.v", "strokeColor.value", "strokeweight"]
 };
 
-/**
- * If any properties are in this list, they will only be considered for the
- * listed tags. Tags must be in lower case!
- */
-MirrorDom.Util.PROPERTY_RESTRICT = {
-    "html": { "colSpan": ["td", "th"] },
-    "vml":  { "path.v":  ["shape"] }
-}
+// ============================================================================
+// Doctype
+// ============================================================================
+MirrorDom.HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+MirrorDom.SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+MirrorDom.VML_NAMESPACE = 'urn:schemas-microsoft-com:vml';
 
-MirrorDom.Util.IGNORE_ATTRIBS = {"style": null};
-MirrorDom.Util.PROPERTY_LOOKUP = MirrorDom.Util.process_property_paths(MirrorDom.Util.PROPERTY_NAMES);
+MirrorDom.determine_node_doc_type = function(node) {
+    // Text node needs to reference parent
+    var n = (node.nodeType == 3) ? node.parentNode : node;
+    switch (n.namespaceURI) {
+        case MirrorDom.HTML_NAMESPACE:
+            return 'html';
+        case MirrorDom.SVG_NAMESPACE:
+            return 'svg';
+        default:
+            // VML hack, sigh
+            // .xmlns seems to be defined with inline xmlns attribute.
+            // .tagUrn seems to be defined with namespace prefix
+            if ((n.xmlns != undefined && n.xmlns == MirrorDom.VML_NAMESPACE) ||
+               (n.tagUrn != undefined && n.tagUrn == MirrorDom.VML_NAMESPACE)) {
+                return 'vml';
+            }
+
+            return 'html';
+    }
+};
+
+// ============================================================================
+// Properties
+// ============================================================================
+
+// Set of ALL properties in a given document type.
+MirrorDom.PROPERTY_NAMES = {
+    'html': ['disabled', 'value', 'checked', 'style.cssText', 'className',
+             'colSpan'],
+    'svg': [],
+    'vml': ['style.cssText', 'runtimeStyle.cssText', 'path.v',
+            'strokeColor.value', 'strokeweight']
+};
+
+// Restrict certain properties to certain tags. Must be in lower case
+MirrorDom.PROPERTY_RESTRICT = {
+    'html': { 'colSpan': MirrorDom.to_set(['td', 'th']) },
+    'vml': { 'path.v': MirrorDom.to_set(['shape']) }
+};
 
 // Cache of doc_type -> tag_name -< lookup
-MirrorDom.Util.PROPERTY_LOOKUP_CACHE = {};
+MirrorDom.PROPERTY_LOOKUP_CACHE = {};
 
 /**
  * Returns a property lookup list for a given node.
  *
- * @returns     Array of [property_key, [property_key_component_lookup]]
- *
- * e.g. [["style.cssText", ["style", "cssText"]], ["disabled", "disabled"]]
+ * e.g. [['style.cssText', ['style', 'cssText']], ['disabled', 'disabled']]
  *
  * The property_key can be used for storing in a flat dictionary, while the
  * property_key_component_lookup allows to descend through nested objects to
  * retrieve/set the value.
+ *
+ * @return {Array} of [property_key, [property_split_components]].
  */
-MirrorDom.Util.get_property_lookup_list = function(node) {
+MirrorDom.get_property_list = function(node) {
     // Only interested in Element node properties
-    if (node.nodeType != 1) {
-        return [];
-    }
-
-    var doc_type = MirrorDom.Util.get_node_doc_type(node);
+    if (node.nodeType != 1) { return null; }
+    var doc_type = MirrorDom.determine_node_doc_type(node);
     var tag_name = node.tagName.toLowerCase();
-
     // Check cache
-    if (MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type] && 
-            MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][tag_name]) {
-        return MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][tag_name];
+    var cached = MirrorDom.PROPERTY_LOOKUP_CACHE;
+    if (cached[doc_type] && cached[doc_type][tag_name]) {
+        return cached[doc_type][tag_name];
     }
-
-    // Begin generate new filtired lookup list
-    var lookup = MirrorDom.Util.PROPERTY_LOOKUP[doc_type];
-    if (lookup == undefined) {
-        throw new Error("Got unexpected doctype for property lookup: " + doc_type);
+    // Begin generate new filtered lookup list
+    var properties = MirrorDom.PROPERTY_NAMES[doc_type];
+    if (properties == undefined) {
+        throw new Error('Unexpected doctype for property lookup: ' + doc_type);
     }
-
-    // No restrictions for this doctype
-    var doc_restrict = MirrorDom.Util.PROPERTY_RESTRICT[doc_type];
-    if (doc_restrict == undefined) {
-        return lookup;
+    var restrict = MirrorDom.PROPERTY_RESTRICT[doc_type];
+    var result = [];
+    for (var i = 0; i < properties.length; i++) {
+        var p = properties[i];
+        if (restrict[p] && !(tag_name in restrict[p])) { continue; }
+        result.push([p, p.split('.')]);
     }
-
-    // Do the filtering
-    var filtered_lookup = [];
-    for (var i = 0; i < lookup.length; i++) {
-        var lookup_text = lookup[i][0];
-
-        if (lookup_text in doc_restrict) {
-            // This property has an entry in the restriction list, we need to
-            // verify if our tag can use it
-            var tag_list = doc_restrict[lookup_text];
-            for (j = 0; j < tag_list.length; j++) {
-                if (tag_list[j] == tag_name) {
-                    filtered_lookup.push(lookup[i]);
-                    break;
-                }
-            }
-        } else {
-            // Property doesn't have a restriction list, add it
-            filtered_lookup.push(lookup[i]);
-        }
-    }
-
-    // Add to cache
-    if (!(doc_type in MirrorDom.Util.PROPERTY_LOOKUP_CACHE)) {
-        MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type] = {};
-    }
-    MirrorDom.Util.PROPERTY_LOOKUP_CACHE[doc_type][tag_name] = filtered_lookup;
-
-    return filtered_lookup;
-}
-
-// ============================================================================
-// Iframes
-// ============================================================================
-/**
- * @param iframe        Iframe object
- */
-MirrorDom.Util.get_document_object_from_iframe = function(iframe) {
-    var d = null;
-    if (iframe) {
-        // Retrieve iframe document
-        if (iframe.contentDocument) {
-            // Firefox
-            d = iframe.contentDocument;
-        }
-        else if (iframe.contentWindow) {
-            // IE
-            d = iframe.contentWindow.document;
-        }
-        else {
-            // Something went very wrong 
-            throw new Error("Could not retrieve IFrame document.");
-        }
-    }
-    else {
-        throw new Error("IFrame is null");
-    }
-
-    return d;
-}
-
-
-// ============================================================================
-// Node processing
-// ============================================================================
-
-/**
- * Checks whether we should ignore the node when building the tree
- */
-MirrorDom.Util.should_ignore_node = function(node) {
-    switch (node.nodeType) {
-        case 3: // case Node.TEXT_NODE:
-            // Ignore if text node is only whitespace
-
-            // OMG IE8 treats nonbreaking spaces as non-whitespace
-            // whereas IE9, Firefox and Chrome etc. don't. IE8, die
-            //var has_content = /\S/.test(node.nodeValue);
-            var has_content = /[\S\u00a0]/.test(node.nodeValue);
-            return !has_content;
-
-        case 1: //case Node.ELEMENT_NODE:
-            // Ignore certain element tags 
-            switch (node.nodeName) {
-                case "META":
-                case "SCRIPT":
-                case "TITLE":
-                    return true;
-                default:
-                    return false;
-            }
-            break;
-    }
-
-    // Ignore everything else
-    return true;
-}
-
-/**
- * Given a DOM node, find the first sibling that we DON'T ignore.
- *
- * Ignores consecutive text nodes until the last one in the sequence.
- * (Text node content needs to be retrieved IN REVERSE)
- */
-MirrorDom.Util.apply_ignore_nodes = function(node) {
-    var possible_next_node = null;
-
-    while (true) {
-        if (node == null) {
-            break;
-        }
-
-        // We need to peek ahead at the next node in order to perform
-        // consecutive text node elimination.
-        possible_next_node = node.nextSibling;
-        while (possible_next_node != null &&
-               MirrorDom.Util.should_ignore_node(possible_next_node)) {
-            possible_next_node = possible_next_node.nextSibling;
-        }
-
-        var found = true;
-
-        // Apply text node elimination. We'll accept text nodes as long as their
-        // immediate next possible sibling isn't also a text node
-        if (MirrorDom.Util.should_ignore_node(node)) {
-            found = false;
-        } else if (possible_next_node != null &&
-                node.nodeType == 3 &&
-                possible_next_node.nodeType == 3) {
-            //console.log("Skipping consecutive text node")
-            found = false;
-        }
-
-        if (found) {
-            break;
-        }
-
-        node = possible_next_node;
-    }
-
-    return node;
-}
-
-/**
- * Assumes we're at the LAST text node in a chain of consecutive text nodes.
- * Constructs string by going backwards.
- */
-MirrorDom.Util.get_text_node_content = function(node) {
-    var value = [];
-    while (node != null && node.nodeType == 3) {
-        if (!MirrorDom.Util.should_ignore_node(node)) {
-            value.unshift(node.nodeValue);
-        }
-        node = node.previousSibling;
-    }
-    return value.join("");
-}
-
-
-/**
- * Get node OuterHTML
- *
- * http://stackoverflow.com/questions/1700870/how-do-i-do-outerhtml-in-firefox
- */
-
-MirrorDom.Util.get_outerhtml = function(node) {
-    if (node.outerHTML !== undefined) {
-        return node.outerHTML;
-    }
-
-    var div = document.createElement('div');
-    div.appendChild( node.cloneNode(true) );
-    var result = div.innerHTML;
-    div = null;
+    if (cached[doc_type] == undefined) { cached[doc_type] = {}; }
+    cached[doc_type][tag_name] = result;
     return result;
-}
+};
 
 /**
  * Set property on a DOM node.
  *
- * @param node              DOM node or arbitrary object (for "cloned" nodes)
+ * @param {node} node           DOM or cloned node (see clone_node).
  *
- * @param prop_lookup       An object attribute path
- *                          e.g. ["style", "cssText"]
+ * @param {array} prop_lookup   An object attribute path
+ *                              e.g. ["style", "cssText"].
  *
- * @param force             Force create arbitrary objects to ensure the path
- *                          gets set (don't use on actual DOM nodes)
+ * @param {boolean} force       Force create arbitrary objects to ensure the
+ *                              path gets set (don't use on actual DOM nodes).
  */
-MirrorDom.Util.set_property = function(node, prop_lookup, value, force) {
+MirrorDom.set_property = function(node, prop_lookup, value, force) {
     var i;
     var prop = node;
     for (i = 0; i < prop_lookup.length - 1; i++) {
@@ -287,25 +120,23 @@ MirrorDom.Util.set_property = function(node, prop_lookup, value, force) {
             if (force) {
                 prop[prop_lookup[i]] = {};
             } else {
-                // Nope
-                return;
+                return; // Nope, couldn't proceed
             }
         }
         prop = prop[prop_lookup[i]];
     }
     prop[prop_lookup[i]] = value;
-}
+};
 
 /**
  * Retrieve property from a DOM node.
  *
- * @param node              DOM node or arbitrary object (for "cloned" nodes)
- *
- * @param prop_lookup       An object attribute path
- *                          e.g. ["style", "cssText"]
- *                          
+ * @param {node} node           DOM node or cloned node.
+ * @param {array} prop_lookup   An object attribute path
+ *                              e.g. ["style", "cssText"].
+ * @return {array}             [success, value].
  */
-MirrorDom.Util.get_property = function(node, prop_lookup) {
+MirrorDom.get_property = function(node, prop_lookup) {
     var prop = node;
     for (var i = 0; i < prop_lookup.length; i++) {
         if (prop_lookup[i] in prop) {
@@ -315,47 +146,200 @@ MirrorDom.Util.get_property = function(node, prop_lookup) {
         }
     }
     return [true, prop];
-}
+};
 
-MirrorDom.Util.HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
-MirrorDom.Util.SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-MirrorDom.Util.VML_NAMESPACE = "urn:schemas-microsoft-com:vml";
+MirrorDom.get_properties = function(node) {
+    var property_list = MirrorDom.get_property_list(node);
+    if (property_list == null) {
+        return null;
+    }
+    var new_props = {};
+    var found = false;
+    for (var i = 0; i < property_list.length; i++) {
+        var prop_text = property_list[i][0];
+        var prop_lookup = property_list[i][1];
+        var prop_result = MirrorDom.get_property(node, prop_lookup);
+        var prop_found = prop_result[0];
+        var prop_value = prop_result[1];
+        if (prop_found && (prop_value != '' && prop_value != null)) {
+            new_props[prop_text] = prop_value;
+            found = true;
+        }
+    }
+    return found ? new_props : null;
+};
+
+// ============================================================================
+// Iframes
+// ============================================================================
+/**
+ * @param {node} iframe      Iframe element.
+ */
+MirrorDom.get_iframe_document = function(iframe) {
+    var d = null;
+    if (iframe) {
+        // Retrieve iframe document
+        if (iframe.contentDocument) {
+            d = iframe.contentDocument; // Firefox
+        } else if (iframe.contentWindow) {
+            d = iframe.contentWindow.document; // IE
+        } else {
+            // Something went very wrong
+            throw new Error('Could not retrieve IFrame document.');
+        }
+    } else {
+        throw new Error('IFrame is null');
+    }
+    return d;
+};
+
+// ============================================================================
+// DOM helpers
+// ============================================================================
 
 /**
- * "HTML"
+ * Add sibling node to the right of target
  */
-MirrorDom.Util.get_node_doc_type = function(node) {
-    // Text node needs to reference parent
-    var n = (node.nodeType == 3) ? node.parentNode : node;
-    switch (n.namespaceURI) {
-        case MirrorDom.Util.HTML_NAMESPACE:
-            return "html";
-        case MirrorDom.Util.SVG_NAMESPACE:
-            return "svg";
-        default:
-            // VML hack, sigh
-            
-            // .xmlns seems to be defined with inline xmlns attribute.
-            // .tagUrn seems to be defined with namespace prefix
-            if ((n.xmlns != undefined && n.xmlns == MirrorDom.Util.VML_NAMESPACE) ||
-                (n.tagUrn != undefined && n.tagUrn == MirrorDom.Util.VML_NAMESPACE)) {
-                return "vml";
-            }
+MirrorDom.insert_after = function(new_node, target) {
+    target.parentNode.insertBefore(new_node, target.nextSibling);
+};
 
-            return "html";
+// ============================================================================
+// Attributes
+// ============================================================================
+
+
+// Ignore certain attributes when doing attribute comparison
+MirrorDom.IGNORE_ATTRIBS = ['style'];
+MirrorDom.IGNORE_ATTRIBS = MirrorDom.to_set(MirrorDom.IGNORE_ATTRIBS);
+
+/**
+ * Determine if we should skip attribute
+ */
+MirrorDom.should_ignore_attribute = function(node_name, attribute) {
+    return (attribute in MirrorDom.IGNORE_ATTRIBS);
+};
+
+// ============================================================================
+// Tags
+// ============================================================================
+MirrorDom.IGNORE_NODES = MirrorDom.to_set(['META', 'SCRIPT', 'TITLE']);
+MirrorDom.ACCEPT_HTML_NODES = MirrorDom.to_set(['BODY', 'HEAD']);
+
+/**
+ * Determines if the current DOM node is an interesting element.
+ */
+MirrorDom.should_ignore_node = function(node) {
+    if (node.nodeType != 1) { return true; }
+    if (node.nodeName in MirrorDom.IGNORE_NODES) { return true; }
+    if (node.parentNode.nodeName == 'HTML' &&
+            !(node.nodeName in MirrorDom.ACCEPT_HTML_NODES)) {
+        return true;
     }
-}
+    return false;
+};
+
+// ============================================================================
+// Traversal
+// ============================================================================
+/**
+ * Iterate through nextSibling until we get the next interesting element.
+ * Note: If the provided node is interesting, returns that straight away.
+ *
+ * @param {node} node       Node from which we start iterating.
+ */
+MirrorDom.next_element = function(node) {
+    while (node != null && MirrorDom.should_ignore_node(node)) {
+        node = node.nextSibling;
+    }
+    return node;
+};
+
+
+/**
+ * zero based, so not REALLY nth child.
+ *
+ * Note: This is designed to return undefined if pos is the index AFTER the
+ * last child in the node (or if index is 0 and node has no children)
+ *
+ * @param {node} node       Node to retrieve the child from.
+ * @param {int} pos         Position of child.
+ */
+MirrorDom.nth_child = function(node, pos) {
+    var n = MirrorDom.next_element(node.firstChild);
+    for (var i = 1; i <= pos; i++) {
+        n = MirrorDom.next_element(n.nextSibling);
+    }
+    return n;
+};
+
+/**
+ *  Retrieve sequential text node content until the next element.
+ *
+ *  Note: Due to the way this is invoked, if node is an interesting element
+ *  as determined by should_ignore_node(), then immediately abort with no text
+ *  returned.
+ *
+ *  @param {node} node      Start element from which to start scanning for
+ *                          sequential text nodes.
+ */
+MirrorDom.get_text_node_content = function(node) {
+    var text = [];
+    node = MirrorDom.next_text_node(node);
+    while (node != null) {
+        text.push(node.nodeValue);
+        node = MirrorDom.next_text_node(node.nextSibling);
+    }
+    return text.join('');
+};
+
+/**
+ * Loops to next sequential text node.
+ *
+ * Note: If passed a text node, will return the text node immediately.
+ */
+MirrorDom.next_text_node = function(node) {
+    while (node != null) {
+        if (!MirrorDom.should_ignore_node(node)) {
+            return null;
+        } else if (node.nodeType == 3) {
+            return node;
+        }
+        node = node.nextSibling;
+    }
+    return node;
+};
+
+// ============================================================================
+// Node processing
+// ============================================================================
+
+/**
+ * Get node OuterHTML
+ *
+ * http://stackoverflow.com/questions/1700870/how-do-i-do-outerhtml-in-firefox
+ */
+MirrorDom.outerhtml = function(node) {
+    if (node.outerHTML !== undefined) {
+        return node.outerHTML;
+    }
+    var div = document.createElement('div');
+    div.appendChild(node.cloneNode(true));
+    return div.innerHTML;
+};
 
 // ============================================================================
 // XML
 // ============================================================================
+
 /**
- * We've parsed
+ * We've got an XML document, and we need to manually construct the nodes and
+ * chuck it into the DOM.
  *
- * @param doc           Document to which the copy belongs
- * @param root          XML node
+ * @param {document} doc       Document to which the copy belongs.
+ * @param {node} root          XML node root.
  */
-MirrorDom.Util.copy_xml_node_to_dom = function(doc, root) {
+MirrorDom.copy_xml_node_to_dom = function(doc, root) {
     function copy_node(node) {
         switch (node.nodeType) {
             case 1:
@@ -372,43 +356,51 @@ MirrorDom.Util.copy_xml_node_to_dom = function(doc, root) {
                 // hmm
         }
     }
-
     function append_child(parent_node, child_node) {
         try {
             parent_node.appendChild(child_node);
             return true;
         } catch (e) {
-            // IE8 HACK: appendChild on <style> or <script> elements don't work...
-            // Unexpected call to method or property access
-            if (e.number == -2147418113 && (parent_node.nodeName == 'SCRIPT' || parent_node.nodeName == 'STYLE')) {
-                // We'll just skip this bit I guess
-                return false;
+            // IE8 HACK: appendChild on <style> or <script> elements don't work:
+            // We get "Unexpected call to method or property access"
+            if (e.number == -2147418113 && (parent_node.nodeName == 'SCRIPT' ||
+                        parent_node.nodeName == 'STYLE')) {
+                return false; // We'll just skip this bit I guess
             }
             throw e;
         }
     }
+    return MirrorDom.copy_dom_node_tree(doc, root, copy_node, append_child);
+};
 
-    return MirrorDom.Util.copy_dom_node_tree(doc, root, copy_node, append_child);
-}
-
-MirrorDom.Util.copy_dom_node_tree = function(doc, root, copy_func, append_child_func) {
+/**
+ * Iterate through an XML document and replicate the nodes on the dom node.
+ *
+ * @param {node} doc                The XML document to copy from.
+ * @param {node} root               The DOM node to copy to.
+ * @param {function} copy_func      Function which takes XML node and returns
+ *                                  target DOM node.
+ * @param {function} append_func    Function which can append the node to the
+ *                                  DOM node.
+ */
+MirrorDom.copy_dom_node_tree = function(doc, root, copy_func, append_func) {
     var node = root;
     var out_root = copy_func(root);
     var out_node = out_root;
 
-    if (append_child_func == undefined) {
-        append_child_func = function(p, c) {
+    // Default append child function: call node's appendChild
+    if (append_func == undefined) {
+        append_func = function(p, c) {
             p.appendChild(c);
             return true;
-        }
+        };
     }
 
     // This is similar to broadcaster's clone node, actually
     while (true) {
-
         if (node.firstChild) {
             var child = copy_func(node.firstChild);
-            var success = append_child_func(out_node, child);
+            var success = append_func(out_node, child);
 
             // Hack because in IE8, some elements don't allow appendChild.
             if (success) {
@@ -423,21 +415,19 @@ MirrorDom.Util.copy_dom_node_tree = function(doc, root, copy_func, append_child_
             return out_root;
         } else if (node.nextSibling) {
             var sibling = copy_func(node.nextSibling);
-            append_child_func(out_node.parentNode, sibling);
+            append_func(out_node.parentNode, sibling);
             node = node.nextSibling;
             out_node = sibling;
         } else {
             while (!node.nextSibling) {
                 node = node.parentNode;
                 out_node = out_node.parentNode;
-
                 if (node === root) {
                     return out_root;
                 }
             }
-
             var sibling = copy_func(node.nextSibling);
-            append_child_func(out_node.parentNode, sibling);
+            append_func(out_node.parentNode, sibling);
             node = node.nextSibling;
             out_node = sibling;
         }
@@ -451,22 +441,23 @@ MirrorDom.Util.copy_dom_node_tree = function(doc, root, copy_func, append_child_
 // SVG
 // ============================================================================
 
-
-
 /**
- * @param svg_doc       SVGDocument to which this belongs (null if node_xml is
- *                      the actual SVG document)
+ * @param {svgdoc} svg_doc      SVGDocument to which this belongs (null if
+ *                              node_xml is the actual SVG document).
  *
- * @param node_xml      XML fragment
+ * @param {string} node_xml     XML fragment.
  */
-MirrorDom.Util.to_svg = function(svg_doc, node_xml) {
+MirrorDom.to_svg = function(svg_doc, node_xml) {
     var parser = new DOMParser();
-    var parsed_svg = parser.parseFromString(node_xml, "image/svg+xml");
-    var d = svg_doc || document; // Note: Using document ONLY works if node_xml contains the entire SVG docoument
+    var parsed_svg = parser.parseFromString(node_xml, 'image/svg+xml');
+    // Note: Using document only works if node_xml contains a complete SVG
+    // docoument.
+    var d = svg_doc || document;
     function copy_svg_node(node) {
         switch (node.nodeType) {
             case 1:
-                var elem = d.createElementNS(MirrorDom.Util.SVG_NAMESPACE, node.tagName);
+                var elem = d.createElementNS(MirrorDom.SVG_NAMESPACE,
+                        node.tagName);
                 for (var i = 0; i < node.attributes.length; i++) {
                     var attrib = node.attributes[i];
                     var ns = attrib.namespaceURI || null;
@@ -481,82 +472,54 @@ MirrorDom.Util.to_svg = function(svg_doc, node_xml) {
         }
     }
 
-    return MirrorDom.Util.copy_dom_node_tree(d, parsed_svg.documentElement, copy_svg_node);
-}
-
-
+    return MirrorDom.copy_dom_node_tree(d, parsed_svg.documentElement,
+            copy_svg_node);
+};
 
 /**
  * ============================================================================
  * Errors
  * ============================================================================
  */
-MirrorDom.Util.PathError = function(root, path) {
-    this.name = "PathError";
+MirrorDom.PathError = function(root, path) {
+    this.name = 'PathError';
     this.root = root;
     this.path = path;
-    this.message = "Couldn't retrieve path " + path.join(",") +
-        " for node " + MirrorDom.Util.describe_node(root);
-}
-//MirrorDom.Util.PathError.prototype = new Error();
-//MirrorDom.Util.PathError.prototype.constructor = MirrorDom.Util.PathError;
+    this.message = 'Couldn\'t retrieve path ' + path.join(',') +
+        ' for node ' + MirrorDom.describe_node(root);
+};
 
-MirrorDom.Util.PathError.prototype.describe_path = function() {
-    return MirrorDom.Util.describe_node_at_path(this.root, this.path);
-}
+MirrorDom.PathError.prototype.describe_path = function() {
+    return MirrorDom.describe_path(this.root, this.path);
+};
 
-MirrorDom.Util.DiffError = function(diff, root, path) {
-    this.name = "PathError";
+MirrorDom.DiffError = function(diff, root, path) {
+    this.name = 'PathError';
     this.diff = diff;
     this.root = root;
     this.path = path;
-    this.message = "Couldn't apply diff [" + diff.join(",") +
-        "] for node " + MirrorDom.Util.describe_node(root) + ", path " +
-        path.join(",");
-}
+    this.message = 'Couldn\'t apply diff [' + diff.join(',') +
+        '] for node ' + MirrorDom.describe_node(root) + ', path ' +
+        path.join(',');
+};
 
-MirrorDom.Util.DiffError.prototype.describe_path = function() {
-    return MirrorDom.Util.describe_node_at_path(this.root, this.path);
-}
+MirrorDom.DiffError.prototype.describe_path = function() {
+    return MirrorDom.describe_path(this.root, this.path);
+};
 
 /**
  * ============================================================================
  * Path Utilities
  * ============================================================================
  */
-MirrorDom.Util.get_properties = function(node) {
-    var property_list = MirrorDom.Util.get_property_lookup_list(node);
 
-    if (node.nodeType == 1) {
-        // Let's go check the node
-        var new_props = {}
-        var diff = false;
-        for (var i = 0; i < property_list.length; i++) {
-            var prop_text = property_list[i][0];
-            var prop_lookup = property_list[i][1];
-            var prop_result = MirrorDom.Util.get_property(node, prop_lookup);
-            var prop_found = prop_result[0];
-            var prop_value = prop_result[1];
-            if (prop_found && (prop_value != "" && prop_value != null)) {
-                new_props[prop_text] = prop_value;
-                diff = true;
-            }
-        }
-        if (diff) {
-            return new_props;
-        }
-    }
-    return null;
-}
-
-
-MirrorDom.Util.path_equal = function(x, y) {
+MirrorDom.path_equal = function(x, y) {
     if (x.length != y.length) { return false; }
     for (var i = 0; i < x.length; i++) {
         if (x[i] != y[i]) { return false; }
     }
     return true;
-}
+};
 
 /**
  * Returns true if "inside" is equal to or a child of "outside"
@@ -565,29 +528,27 @@ MirrorDom.Util.path_equal = function(x, y) {
  *
  * Note that "outside" should be the SHORTER path (shorter means higher up)
  */
-MirrorDom.Util.is_inside_path = function(inside, outside) {
+MirrorDom.is_inside_path = function(inside, outside) {
     if (inside.length < outside.length) { return false; }
     for (var i = 0; i < outside.length; i++) {
-        if (outside[i] != inside[i]) { 
+        if (outside[i] != inside[i]) {
             return false;
         }
     }
     return true;
-}
+};
 
-MirrorDom.Util.node_at_path = function(root, ipath) {
+MirrorDom.node_at_path = function(root, ipath) {
     var node = root;
-    for (var i=0; i < ipath.length; i++) {
-        node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
+    for (var i = 0; i < ipath.length; i++) {
+        node = MirrorDom.next_element(node.firstChild);
         if (node == null) {
-            //debugger;
-            throw new MirrorDom.Util.PathError(root, ipath);
+            throw new MirrorDom.PathError(root, ipath);
         }
-        for (var j=0; j < ipath[i]; j++) {
-            node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+        for (var j = 0; j < ipath[i]; j++) {
+            node = MirrorDom.next_element(node.nextSibling);
             if (node == null) {
-                //debugger;
-                throw new MirrorDom.Util.PathError(root, ipath);
+                throw new MirrorDom.PathError(root, ipath);
             }
         }
     }
@@ -595,7 +556,7 @@ MirrorDom.Util.node_at_path = function(root, ipath) {
 };
 
 /**
- * Node at upath...these are very similar to ipaths except
+ * Node at framepath...these are very similar to ipaths except
  * they contain directives to continue descending in iframes.
  *
  * The "u" stands for universal. I'm not sure what the "i" stands for, i'll
@@ -605,46 +566,48 @@ MirrorDom.Util.node_at_path = function(root, ipath) {
  * - iframe at position 1,4,3
  * - inside that iframe, the node at 1,1,2
  *
- * @param doc       Document object (preferably not an actual DOM element in
- *                  the document)
+ * @param {document} doc    Document object (preferably not an actual DOM
+ *                          element in the document).
  *
- * @returns         DOM node (if last item in path is 'i', then iframe element)
+ * @return {node}           DOM node (if last item in path is 'i', then iframe
+ *                          element).
  */
-MirrorDom.Util.node_at_upath = function(doc, upath) {
+MirrorDom.node_at_framepath = function(doc, framepath) {
     var node = doc;
     var in_iframe = false;
 
-    for (var i=0; i < upath.length; i++) {
-        switch (upath[i]) {
+    for (var i = 0; i < framepath.length; i++) {
+        switch (framepath[i]) {
             case 'm':
                 // Special case: Should be the root of the main frame document
                 // Ignore this and keep proceeding.
-                if (node.nodeName.toLowerCase() == "iframe") {
+                if (node.nodeName.toLowerCase() == 'iframe') {
                     in_iframe = true;
                 }
                 break;
             case 'i':
                 // Descend into iframe - root at this point should be an
                 // iframe, otherwise we got a problem
-                //var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                //var d = MirrorDom.get_iframe_document(node);
                 //node = d;
                 if (node.nodeName.toLowerCase() != 'iframe') {
-                    throw new Error("Should be in iframe but not, instead got: " + node.nodeName);
+                    throw new Error('Should be in iframe but got' +
+                            node.nodeName + ' instead.');
                 }
                 in_iframe = true;
                 break;
             default:
                 // Descend from document object
                 if (in_iframe) {
-                    var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                    var d = MirrorDom.get_iframe_document(node);
                     node = d.documentElement;
                     in_iframe = false;
                 }
 
                 // should be a number
-                node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
-                for (var j=0; j < upath[i]; j++) {
-                    node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+                node = MirrorDom.next_element(node.firstChild);
+                for (var j = 0; j < framepath[i]; j++) {
+                    node = MirrorDom.next_element(node.nextSibling);
                 }
                 break;
         }
@@ -658,20 +621,20 @@ MirrorDom.Util.node_at_upath = function(doc, upath) {
 /**
  * Print a string representation of a node
  */
-MirrorDom.Util.describe_node = function(node) {
+MirrorDom.describe_node = function(node) {
     var desc = [];
-    desc.push("<", node.nodeName);
-    if (node.id) { desc.push(" #", node.id); }
+    desc.push('<', node.nodeName);
+    if (node.id) { desc.push(' #', node.id); }
     if (node.className) { desc.push(' class="', node.className, '"'); }
-    desc.push(">");
-    return desc.join("")
-}
+    desc.push('>');
+    return desc.join('');
+};
 
 
 /**
  * Debug utility, returns a string describing the node path
  */
-MirrorDom.Util.describe_node_at_path = function(root, ipath) {
+MirrorDom.describe_path = function(root, ipath) {
     var node = root;
     var path_desc = [];
     var terminate = false;
@@ -680,87 +643,87 @@ MirrorDom.Util.describe_node_at_path = function(root, ipath) {
         var item_desc = [];
         var line_desc = [];
 
-        node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
-        for (var j=0; j <= ipath[i]; j++) {
+        node = MirrorDom.next_element(node.firstChild);
+        for (var j = 0; j <= ipath[i]; j++) {
             if (j != 0) {
-                node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+                node = MirrorDom.next_element(node.nextSibling);
             }
             if (node == null) {
-                item_desc = [j, ": ", "null :("];
-                line_desc.push(item_desc.join(""));
+                item_desc = [j, ': ', 'null :('];
+                line_desc.push(item_desc.join(''));
                 terminate = true;
                 break;
             } else {
-                item_desc = [j, ": ", MirrorDom.Util.describe_node(node)];
-                line_desc.push(item_desc.join(""));
+                item_desc = [j, ': ', MirrorDom.describe_node(node)];
+                line_desc.push(item_desc.join(''));
             }
         }
 
-        path_desc.push(line_desc.join(" -> "));
+        path_desc.push(line_desc.join(' -> '));
 
         if (terminate) {
             break;
         }
     }
-    return path_desc.join("\n");
-}
+    return path_desc.join('\n');
+};
 
 /**
- * Debug utility, returns a string describing the upath
+ * Debug utility, returns a string describing the framepath
  */
-MirrorDom.Util.describe_node_at_upath = function(root, upath) {
+MirrorDom.describe_framepath = function(root, framepath) {
     var node = root;
     var terminate = false;
     var path_desc = [];
     var parts_desc = [];
-    for (var i=0; i < upath.length; i++) {
-        switch (upath[i]) {
+    for (var i = 0; i < framepath.length; i++) {
+        switch (framepath[i]) {
             case 'm':
                 // Special case: Should be the root of the main frame document
                 // Ignore this and keep proceeding.
                 if (node.nodeName.toLowerCase() != 'iframe') {
-                    var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                    var d = MirrorDom.get_iframe_document(node);
                     node = d.documentElement;
-                    path_desc.push("m: Descending into main iframe");
+                    path_desc.push('m: Descending into main iframe');
                 } else {
-                    path_desc.push("m: Ignoring");
+                    path_desc.push('m: Ignoring');
                 }
                 break;
             case 'i':
                 // Descend into iframe - root at this point should be an
                 // iframe, otherwise we got a problem
-                var d = MirrorDom.Util.get_document_object_from_iframe(node);
+                var d = MirrorDom.get_iframe_documenget_iframe_document(node);
                 node = d.documentElement;
-                path_desc.push("i: Descending into iframe");
+                path_desc.push('i: Descending into iframe');
                 break;
             default:
                 // should be a number
                 parts_desc = [];
-                node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
-                for (var j=0; j <= upath[i]; j++) {
+                node = MirrorDom.next_element(node.firstChild);
+                for (var j = 0; j <= framepath[i]; j++) {
                     if (j != 0) {
-                        node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+                        node = MirrorDom.next_element(node.nextSibling);
                     }
                     if (node == null) {
-                        item_desc = [j, ": ", "null :("];
-                        parts_desc.push(item_desc.join(""));
+                        item_desc = [j, ': ', 'null :('];
+                        parts_desc.push(item_desc.join(''));
                         terminate = true;
                         break;
                     } else {
-                        item_desc = [j, ": ", MirrorDom.Util.describe_node(node)];
-                        parts_desc.push(item_desc.join(""));
+                        item_desc = [j, ': ', MirrorDom.describe_node(node)];
+                        parts_desc.push(item_desc.join(''));
                     }
                 }
-                path_desc.push(parts_desc.join(" -> "));
+                path_desc.push(parts_desc.join(' -> '));
                 break;
         }
         if (terminate) {
             break;
         }
     }
-    return path_desc.join("\n");
-}
+    return path_desc.join('\n');
+};
 
-MirrorDom.Util.is_main_upath = function(upath) {
-    return (upath.length == 1 && upath[0] == 'm');
-}
+MirrorDom.is_main_framepath = function(framepath) {
+    return (framepath.length == 1 && framepath[0] == 'm');
+};

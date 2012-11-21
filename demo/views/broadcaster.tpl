@@ -13,8 +13,9 @@
         <script type="text/javascript"
             src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
         <script type="text/javascript">
+            var broadcaster;
             jQuery(function() {
-                var broadcaster = new MirrorDom.Broadcaster({
+                broadcaster = new MirrorDom.Broadcaster({
                     root_url: "{{mirrordom_uri}}/",
                     iframe:   document.getElementById("mirrordom_iframe"),
                     debug:    true,

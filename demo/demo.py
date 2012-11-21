@@ -72,10 +72,12 @@ def handle_mirrordom(name):
     """
     Core mirrordom server functionality
     """
+    print "START %s" % (name)
     global mirrordom_storage
     query = bottle.request.params
     parsed_query = dict((k, json.loads(v)) for k,v in query.iteritems())
     result = getattr(mirrordom.server, "handle_" + name)(mirrordom_storage, **parsed_query)
+    print "END %s" % (name)
     return result
 
 @app.route('/debug_storage')

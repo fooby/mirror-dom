@@ -18,8 +18,8 @@ var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 /**
  * Constructor and entry point for MirrorDom.Broadcaster class.
  *
- * @param options       Dictionary of various options - see init()
- * @param parent        Reference to parent broadcaster object.
+ * @param {object} options          Dictionary of various options - see init().
+ * @param {object} parent_details   Reference to parent broadcaster instance.
  */
 MirrorDom.Broadcaster = function(options, parent_details) {
 
@@ -29,11 +29,11 @@ MirrorDom.Broadcaster = function(options, parent_details) {
     // Reference to the parent broadcaster (except for the top level iframe)
     if (parent_details != null) {
          // 'i' for iframe, 'w' for window, 'm' for main
-        this.frame_type = parent_details["frame_type"];
-         // Path of this broadcaster, relative to parent broadcaster's frame/window
-        this.path_in_parent = parent_details["path_in_parent"];
+        this.frame_type = parent_details['frame_type'];
+        // Path relative to parent broadcaster's frame/window
+        this.path_in_parent = parent_details['path_in_parent'];
         // Reference to parent broadcaster
-        this.parent = parent_details["parent"];
+        this.parent = parent_details['parent'];
         this.event_listeners = null;
     } else {
         this.frame_type = 'm';
@@ -44,7 +44,7 @@ MirrorDom.Broadcaster = function(options, parent_details) {
 
     // Mapping of path keys -> broadcaster object for child iframes
     // Paths converted to comma separated strings e.g. a node path of [1,2,4]
-    // becomes "1,2,4" 
+    // becomes '1,2,4'
     this.child_iframes = {};
 
     // State
@@ -59,15 +59,16 @@ MirrorDom.Broadcaster = function(options, parent_details) {
 
     // Initialise options
     this.init_options(options);
-    
+
     // Attach load handler
-    jQuery(this.iframe).on("load.mirrordom", jQuery.proxy(this.handle_load_page, this));
-}
+    jQuery(this.iframe).on('load.mirrordom',
+            jQuery.proxy(this.handle_load_page, this));
+};
 
 /**
  * Extract options from constructor arg
  *
- * @param options           Broadcaster options
+ * @param {object} options           Broadcaster options.
  *
  *      - iframe:   An iframe object to track, otherwise we'll just use the
  *                  current document (which should not be used in practice,
@@ -83,7 +84,7 @@ MirrorDom.Broadcaster.prototype.init_options = function(options) {
         this.push_method = options.push_method;
     } else if (options.root_url) {
         var pusher = new MirrorDom.JQueryXHRPusher(options.root_url);
-        this.push_method = jQuery.proxy(pusher, "push");
+        this.push_method = jQuery.proxy(pusher, 'push');
     }
 
     // Force the poll message to be sent even if no data we need to send
@@ -105,11 +106,11 @@ MirrorDom.Broadcaster.prototype.init_options = function(options) {
  * Perform a single iteration of mirrordom logic.
  *
  * This function should be called at regular intervals to get semi-responsive
- * browser synchronisation. 
+ * browser synchronisation.
  */
 MirrorDom.Broadcaster.prototype.go = function() {
     this.poll();
-}
+};
 
 
 // ----------------------------------------------------------------------------
@@ -131,7 +132,7 @@ MirrorDom.Broadcaster.prototype.process_and_get_messages = function(messages) {
     //
     // The data structure we'll send:
     // - messages:      List of messages for current window
-    // 
+    //
     // "Messages" are representations of events and their data. e.g.:
     //
     // - Starting a new broadcaster session should transmit all the initial
@@ -156,27 +157,30 @@ MirrorDom.Broadcaster.prototype.process_and_get_messages = function(messages) {
     // first message will be incomplete.
 
     // Don't do anything if the document is still loading
-    var d = this.get_document_object();
-    if (d.readyState != "complete") {
-        this.log("Page is loading, skip poll");
+    var d = this.get_document();
+    if (d.readyState != 'complete') {
+        this.log('Page is loading, skip poll');
         return;
     }
 
     if (this.is_new_frame()) {
-        var data = this.start_full_document();
-        this.add_message(messages, "new_instance", data);
-        this.log("Sending new instance for document at " + this.get_frame_path().join(","));
+        var data = this.start_document();
+        this.add_message(messages, 'new_instance', data);
+        this.log('Sending new instance for document at ' +
+                this.get_frame_path().join(','));
         this.was_new_page_loaded = false;
     } else if (this.was_new_page_loaded) {
-        var data = this.start_full_document();
-        this.add_message(messages, "new_page", data);
-        this.log("Sending new page for document at " + this.get_frame_path().join(","));
+        var data = this.start_document();
+        this.add_message(messages, 'new_page', data);
+        this.log('Sending new page for document at ' +
+                this.get_frame_path().join(','));
         this.was_new_page_loaded = false;
     } else {
         var diffs = this.get_diff();
         if (diffs.length > 0) {
-            this.log("Sending " + diffs.length + " diffs for document at " + this.get_frame_path().join(","));
-            this.add_message(messages, "diffs", {"diffs": diffs});
+            this.log('Sending ' + diffs.length + ' diffs for document at ' +
+                    this.get_frame_path().join(','));
+            this.add_message(messages, 'diffs', {'diffs': diffs});
         }
     }
 
@@ -187,21 +191,20 @@ MirrorDom.Broadcaster.prototype.process_and_get_messages = function(messages) {
     }
 
     return messages;
-}
+};
 
 MirrorDom.Broadcaster.prototype.add_message = function(messages, type, data) {
     var path = this.get_frame_path();
-    //var name = path.join(",");
     messages.push([path, type, data]);
-}
+};
 
 /**
  * We throw out all our current state, rescan the entire document and
  * return new messages to reconstruct the document.
  *
- * @returns     Message style document dump 
+ * @return {object}      Document dump in message format.
  */
-MirrorDom.Broadcaster.prototype.start_full_document = function() {
+MirrorDom.Broadcaster.prototype.start_document = function() {
     // We're destroying our state
     this.destroy_child_iframes();
 
@@ -221,9 +224,12 @@ MirrorDom.Broadcaster.prototype.start_full_document = function() {
     var dom_iterator = new MirrorDom.DomIterator(doc_elem);
 
     // Apply our handling of new nodes
-    dom_iterator.attach_handler(jQuery.proxy(this.find_iframes_from_dom_iterator, this));
-    dom_iterator.attach_handler(this.collect_props_from_dom_iterator, prop_diffs);
-    dom_iterator.attach_handler(jQuery.proxy(this.rewrite_targets_in_dom_iterator, this));
+    dom_iterator.add_handler(
+            jQuery.proxy(this.find_iframes_from_dom_iterator, this));
+    dom_iterator.add_handler(
+            this.collect_props_from_dom_iterator, prop_diffs);
+    dom_iterator.add_handler(
+            jQuery.proxy(this.rewrite_targets_in_dom_iterator, this));
     results = dom_iterator.run();
 
     // Clone the DOM
@@ -237,18 +243,16 @@ MirrorDom.Broadcaster.prototype.start_full_document = function() {
     }
 
     for (var i = 0; i < prop_diffs.length; i++) {
-        prop_diffs[i].unshift("props");
+        prop_diffs[i].unshift('props');
     }
 
-    var data = {
-        "html":  html,
-        "props": prop_diffs,
-        "url":   url,
-        "iframes": iframe_paths
-    }
-
-    return data;
-} 
+    return {
+        'html': html,
+        'props': prop_diffs,
+        'url': url,
+        'iframes': iframe_paths
+    };
+};
 
 /**
  * Retrieve the diff and update the cloned dom
@@ -262,22 +266,23 @@ MirrorDom.Broadcaster.prototype.get_diff = function() {
         this.make_dom_clone();
     }
     return diffs;
-}
+};
 
 MirrorDom.Broadcaster.prototype.make_dom_clone = function(doc_elem) {
     doc_elem = doc_elem == null ? this.get_document_element() : doc_elem;
     this.cloned_dom = this.clone_dom(doc_elem);
-}
+};
 
 // ----------------------------------------------------------------------------
 // Event handling
 // ----------------------------------------------------------------------------
 MirrorDom.Broadcaster.prototype.handle_load_page = function() {
-    this.log("Loaded new page at " + this.get_frame_path().join(",") + " !" );
+    this.log('Loaded new page at ' + this.get_frame_path().join(',') + ' !');
     this.was_new_page_loaded = true;
-    this.fire_event("on_page_load", {url: this.iframe.contentWindow.location.href});
+    this.fire_event('on_page_load',
+            {url: this.iframe.contentWindow.location.href});
     this.rewrite_link_targets();
-}
+};
 
 /**
  * Try to avoid frame busting links which set target to _top
@@ -286,9 +291,10 @@ MirrorDom.Broadcaster.prototype.rewrite_link_targets = function() {
     var iframe_name = this.iframe.name;
     var doc_elem = this.get_document_element();
     var links_forms = jQuery("[target='_top']", doc_elem);
-    links_forms.attr("target", iframe_name);
-    this.log("Rewrote " + links_forms.length + " link/form targets to \"" + iframe_name + "\"");
-}
+    links_forms.attr('target', iframe_name);
+    this.log('Rewrote ' + links_forms.length + ' link/form targets to "' +
+            iframe_name + '"');
+};
 
 // ----------------------------------------------------------------------------
 // Event handling
@@ -298,14 +304,17 @@ MirrorDom.Broadcaster.prototype.add_event_listener = function(event, callback) {
         this.event_listeners[event] = [];
     }
     this.event_listeners[event].push(callback);
-}
+};
 
 MirrorDom.Broadcaster.prototype.fire_event = function(event, data) {
-    if (this.event_listeners == undefined || this.event_listeners[event] == undefined ) { return; }
-    for (var i=0; i < this.event_listeners[event].length; i++) {
+    if (this.event_listeners == undefined ||
+            this.event_listeners[event] == undefined) {
+        return;
+    }
+    for (var i = 0; i < this.event_listeners[event].length; i++) {
         this.event_listeners[event][i](data);
     }
-}
+};
 
 // ----------------------------------------------------------------------------
 // Internal utility functions
@@ -317,30 +326,31 @@ MirrorDom.Broadcaster.prototype.get_frame_path = function() {
     var path = [];
     var p = this;
     while (p != null) {
-        // Prepend parent's relative path and child type ('i' for iframe, 'w' for window)
+        // Prepend parent's relative path and child type
+        // ('i' for iframe, 'w' for window)
         path = p.path_in_parent.concat([p.frame_type], path);
         p = p.parent;
     }
 
     // Comma-join path elements
     return path;
-}
+};
 
-MirrorDom.Broadcaster.prototype.get_document_object = function() {
-    return MirrorDom.Util.get_document_object_from_iframe(this.iframe);
-}
+MirrorDom.Broadcaster.prototype.get_document = function() {
+    return MirrorDom.get_iframe_document(this.iframe);
+};
 
 MirrorDom.Broadcaster.prototype.get_document_element = function() {
-    return this.get_document_object().documentElement;
-}
+    return this.get_document().documentElement;
+};
 
 MirrorDom.Broadcaster.prototype.is_new_frame = function() {
     return (!this.cloned_dom);
-}
+};
 
 MirrorDom.Broadcaster.prototype.is_top_broadcaster = function() {
     return this.parent == null;
-}
+};
 
 // ----------------------------------------------------------------------------
 // Internal logic
@@ -350,25 +360,26 @@ MirrorDom.Broadcaster.prototype.is_top_broadcaster = function() {
  */
 MirrorDom.Broadcaster.prototype.poll = function() {
     if (this.parent != null) {
-        throw new Error("Can't poll on child broadcasters");
+        throw new Error('Can\'t poll on child broadcasters');
     }
 
     // Check if we're still in the middle of sending/receiving another message
     if (this.sending) {
-        this.log("Broadcaster: still sending...")
+        this.log('Broadcaster: still sending...');
         return;
     }
 
-    var messages = []
+    var messages = [];
     this.process_and_get_messages(messages);
 
     if (this.force_poll || messages.length > 0) {
         // Grab iframes to inform the server which iframes are in fact still
         // active after these latest changes.
         var iframes = this.get_all_iframe_paths();
-        this.push_method('send_update', {"messages": messages, "iframes": iframes});
+        this.push_method('send_update',
+                {'messages': messages, 'iframes': iframes});
     }
-}
+};
 
 /**
  * Clean up when we no longer need the broadcaster object
@@ -382,13 +393,13 @@ MirrorDom.Broadcaster.prototype.destroy = function() {
     // Disabling because this doesn't quite work right (plus the iframes don't
     // exist at the point this is called)
     //jQuery(this.iframe).off(".mirrordom");
-}
+};
 
 
 /**
  * Populate a list with all iframe paths
  *
- * @param paths     The list the populate
+ * @param {array} paths     A list to populate.
  *
  * No return value
  */
@@ -398,10 +409,10 @@ MirrorDom.Broadcaster.prototype.get_all_iframe_paths = function(paths) {
     }
     paths.push(this.get_frame_path());
     for (var key in this.child_iframes) {
-        this.child_iframes[key]["broadcaster"].get_all_iframe_paths(paths);
+        this.child_iframes[key]['broadcaster'].get_all_iframe_paths(paths);
     }
     return paths;
-}
+};
 
 /**
  * Remove all broadcaster references to our iframes (usually done when doing a
@@ -414,7 +425,7 @@ MirrorDom.Broadcaster.prototype.destroy_child_iframes = function() {
     }
 
     this.child_iframes = {};
-}
+};
 
 /**
  * Returns a copy of a DOM tree (can't really use DomIterator because it
@@ -457,21 +468,22 @@ MirrorDom.Broadcaster.prototype.clone_dom = function(root) {
 /**
  * Extract relevant data from the node
  */
-MirrorDom.Broadcaster.prototype.clone_node = function(node, include_properties) {
+MirrorDom.Broadcaster.prototype.clone_node = function(node,
+        include_properties) {
     // deep copy.
     var clone = {
         'attributes': {},
-        'nodeName':   node.nodeName,
-        'nodeType':   node.nodeType,
-        'nodeValue':  node.nodeValue,
-        'namespaceURI':  node.namespaceURI
+        'nodeName': node.nodeName,
+        'nodeType': node.nodeType,
+        'nodeValue': node.nodeValue,
+        'namespaceURI': node.namespaceURI
     };
 
     if (node.attributes) {
-        for (var i=0; i < node.attributes.length; i++) {
+        for (var i = 0; i < node.attributes.length; i++) {
             var attrib = node.attributes[i];
             // IE thing 1
-            if (attrib.name in MirrorDom.Util.IGNORE_ATTRIBS) { continue; }
+            if (attrib.name in MirrorDom.IGNORE_ATTRIBS) { continue; }
             // IE thing 2
             if (attrib.specified) {
                 clone.attributes[attrib.name] = attrib.value;
@@ -480,7 +492,7 @@ MirrorDom.Broadcaster.prototype.clone_node = function(node, include_properties) 
     }
 
     if (include_properties) {
-        var props = MirrorDom.Util.get_properties(node);
+        var props = MirrorDom.get_properties(node);
         if (props != null) {
             clone.props = props;
         }
@@ -494,22 +506,23 @@ MirrorDom.Broadcaster.prototype.clone_node = function(node, include_properties) 
  */
 MirrorDom.Broadcaster.prototype.register_new_iframe = function(iframe, ipath) {
 
-    this.log("Registering new iframe at " + ipath + "!");
-    var key = ipath.join(",");
+    this.log('Registering new iframe at ' + ipath + '!');
+    var key = ipath.join(',');
     if (key in this.child_iframes) {
-        throw new Error("Trying to add new iframe which already exists at [" + key + "]");
+        throw new Error('Trying to add new iframe which already exists at [' +
+                key + ']');
     }
 
     var parent_details = {
         'parent': this,
         'frame_type': 'i', // i for iframe
         'path_in_parent': ipath
-    }
+    };
 
     var options = {
         'iframe': iframe,
         'debug': this.debug
-    }
+    };
 
     var iframe_broadcaster = new MirrorDom.Broadcaster(options, parent_details);
 
@@ -517,7 +530,7 @@ MirrorDom.Broadcaster.prototype.register_new_iframe = function(iframe, ipath) {
         'ipath': ipath,
         'broadcaster': iframe_broadcaster
     };
-}
+};
 
 /**
  * Get the current document so we can replicate it. Hopefully we can just use
@@ -558,7 +571,7 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
     //
     // Note: Empty text nodes are ignored, but non-empty text nodes are
     // included in the index offsets.
-    
+
     var ipath = [];
     var diffs = [];
 
@@ -566,7 +579,7 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
     // Actual: The current DOM being viewed in the browser
     // Cloned: A representation of the previous state of the DOM at
     //         the time we did our last diff.
- 
+
     // Used to indicate when we've finished traversing a node's children and
     // need to go back up.
     var ascended_parent = false;
@@ -578,7 +591,7 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
     // Keep references of the current node's parents
     var node_parent = null;
     var cnode_parent = null;
-   
+
     while (true) {
         if (ascended_parent) {
             // Don't do node comparison, just traverse onto next sibling
@@ -587,12 +600,12 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
 
             // SCENARIO 1: One or more new nodes added, all them all to the diff
             while (node) {
-                this.handle_diff_added_node(diffs, ipath, node);
+                this.handle_diff_add_node(diffs, ipath, node);
                 // Move onto next node
-                node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
-                ipath[ipath.length-1]++;
+                node = MirrorDom.next_element(node.nextSibling);
+                ipath[ipath.length - 1]++;
             }
-            // node and cnode should be null at this point (causing parent ascent)
+            // node and cnode should be null now
         } else if (node == null) {
             // SCENARIO 2: A node was removed recently
             this.handle_diff_delete_nodes(diffs, ipath, cnode);
@@ -605,6 +618,7 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
             if (!structure_changed) {
                 this.handle_diff_node_attributes(diffs, ipath, node, cnode);
                 this.handle_diff_node_properties(diffs, ipath, node, cnode);
+                this.handle_diff_node_text(diffs, ipath, node, cnode);
 
                 // The nodes appear to be the same, let's descend into child
                 // nodes if they exist
@@ -612,34 +626,34 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
                     // At least one of the nodes has children, so we'll descend
                     node_parent = node;
                     cnode_parent = cnode;
-                    node = MirrorDom.Util.apply_ignore_nodes(node.firstChild);
-                    cnode = MirrorDom.Util.apply_ignore_nodes(cnode.firstChild);
+                    node = MirrorDom.next_element(node.firstChild);
+                    cnode = MirrorDom.next_element(cnode.firstChild);
 
                     // Add 0 onto the ipath path to represent visiting the
                     // first child of the current node
                     ipath.push(0);
-                    continue
+                    continue;
                 }
 
             } else {
                 // Node has visibly changed. The "changed" node might indicate
                 // an inserted/deleted node. We'll just delete and recreate all
                 // the siblings to the right of this node.
-                
+
                 // Handle delete messages for the nodes
                 cnode_ipath = ipath.slice();
-                
+
                 this.handle_diff_delete_nodes(diffs, cnode_ipath, cnode);
-                    
+
                 // Now handle add messages to recreate all the nodes
                 while (node) {
-                    this.handle_diff_added_node(diffs, ipath, node);
-                    node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
-                    ipath[ipath.length-1]++;
+                    this.handle_diff_add_node(diffs, ipath, node);
+                    node = MirrorDom.next_element(node.nextSibling);
+                    ipath[ipath.length - 1]++;
                 }
             }
         }
-        
+
         // Oh look, we've reached the root node, let's finish there
         if (node === dom_root) {
             break;
@@ -647,11 +661,11 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
 
         if (node != null && cnode != null) {
             // Proceed onto next sibling if both nodes existed
-            node = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
-            cnode = MirrorDom.Util.apply_ignore_nodes(cnode.nextSibling);
+            node = MirrorDom.next_element(node.nextSibling);
+            cnode = MirrorDom.next_element(cnode.nextSibling);
 
             // Increase the last ipath element to represent the next sibling
-            ipath[ipath.length-1]++;
+            ipath[ipath.length - 1]++;
         } else {
             // Parent traversal since we're done with siblings
             node = node_parent;
@@ -661,14 +675,16 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
 
             // Pop last item off path to represent going back up the tree
             ipath.pop();
-            
+
             // Notiy that we're revisiting the parent for the second time (i.e.
             // we're ready to move onto the siblings)
+
             ascended_parent = true;
         }
     }
     return diffs;
-}
+};
+
 /**
  * Compares the tagname, nodetype and attributes. Dumps difference information
  * into diffs param.
@@ -679,45 +695,44 @@ MirrorDom.Broadcaster.prototype.diff_dom = function(dom_root, cloned_root) {
  * Returns true if structurally different, false if same
  */
 MirrorDom.Broadcaster.prototype.compare_nodes = function(ipath, dnode, cnode) {
-    if (dnode.nodeName != cnode.nodeName || dnode.nodeType != cnode.nodeType || 
+    if (dnode.nodeName != cnode.nodeName || dnode.nodeType != cnode.nodeType ||
             dnode.nodeValue != cnode.nodeValue) {
         return true;
     }
     return false;
-}
+};
 
 /**
  * Called at the top of an added node structure - not called on child nodes,
  * but we're about to iterate through them anyway.
  */
-MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath, node) {
-    ipath = ipath.slice();
-    switch (node.nodeType) {
-        case 1:
-            // ELEMENT
-            var dom_iterator = new MirrorDom.DomIterator(node, ipath);
-            var prop_diffs = [];
-            // We've detected a new Element node. We want to continue iterating
-            // through the added node's structure.
-            // 1) Check if there's any iframes that we need to keep track of
-            dom_iterator.attach_handler(jQuery.proxy(this.find_iframes_from_dom_iterator, this));
-            // 2) Collect node properties relative to the newly added node
-            dom_iterator.attach_handler(this.collect_props_from_dom_iterator, prop_diffs);
-            dom_iterator.attach_handler(jQuery.proxy(this.rewrite_targets_in_dom_iterator, this));
-            dom_iterator.run();
-
-            // Ok, add the new node
-            var html = MirrorDom.Util.get_outerhtml(node);
-            var type = MirrorDom.Util.get_node_doc_type(node); // svg or html
-            diffs.push(['node', type, ipath, html, prop_diffs]);
-            break;
-        case 3:
-            // TEXT
-            var type = MirrorDom.Util.get_node_doc_type(node); // svg or html
-            diffs.push(['text', type, ipath, MirrorDom.Util.get_text_node_content(node)]);
-            break;
+MirrorDom.Broadcaster.prototype.handle_diff_add_node =
+function(diffs, ipath, node) {
+    if (node.nodeType != 1) {
+        throw new Error('Expected Element node');
     }
-}
+    ipath = ipath.slice();
+    // ELEMENT
+    var dom_iterator = new MirrorDom.DomIterator(node, ipath);
+    var prop_diffs = [];
+    // We've detected a new Element node. We want to continue iterating
+    // through the added node's structure.
+    // 1) Check if there's any iframes that we need to keep track of
+    dom_iterator.add_handler(
+            jQuery.proxy(this.find_iframes_from_dom_iterator, this));
+    // 2) Collect node properties relative to the newly added node
+    dom_iterator.add_handler(
+            this.collect_props_from_dom_iterator, prop_diffs);
+    dom_iterator.add_handler(
+            jQuery.proxy(this.rewrite_targets_in_dom_iterator, this));
+    dom_iterator.run();
+
+    // Ok, add the new node
+    var html = MirrorDom.outerhtml(node);
+    var type = MirrorDom.determine_node_doc_type(node); // svg or html
+    var tail_text = MirrorDom.get_text_node_content(node.nextSibling);
+    diffs.push(['node', type, ipath, html, tail_text, prop_diffs]);
+};
 
 
 /**
@@ -725,111 +740,104 @@ MirrorDom.Broadcaster.prototype.handle_diff_added_node = function (diffs, ipath,
  * Note: When this is called, the node and ALL siblings to the right have been
  * deleted.
  *
- * @param cnode             Node cloned in clone_node() (not an actual DOM node)
+ * @param {array} diffs     Reference to diff list to populate.
+ * @param {array} ipath     Path of element.
+ * @param {node} cnode      Node cloned in clone_node() (not actual DOM node).
  */
-MirrorDom.Broadcaster.prototype.handle_diff_delete_nodes = function(diffs, ipath, cnode) {
-    var type = MirrorDom.Util.get_node_doc_type(cnode); // html or svg
+MirrorDom.Broadcaster.prototype.handle_diff_delete_nodes =
+function(diffs, ipath, cnode) {
+    var type = MirrorDom.determine_node_doc_type(cnode); // html or svg
     diffs.push(['deleted', type, ipath.slice()]);
-    //diffs.push(['deleted', type, ipath.slice(), cnode.nodeName, cnode.nodeValue]);
     ipath = ipath.slice();
     // Scan for iframes which have been deleted
     while (cnode) {
         for (var key in this.child_iframes) {
-            var child_iframe_ipath = this.child_iframes[key]['ipath'] ;
-            if (MirrorDom.Util.is_inside_path(child_iframe_ipath, ipath)) {
+            var child_iframe_ipath = this.child_iframes[key]['ipath'];
+            if (MirrorDom.is_inside_path(child_iframe_ipath, ipath)) {
                 // Remove iframe object
-                this.log("Removing iframe at " + child_iframe_ipath + "! (Because of deleted node " + ipath + ")");
+                this.log('Removing iframe at ' + child_iframe_ipath +
+                        '! (Because of deleted node ' + ipath + ')');
                 this.child_iframes[key]['broadcaster'].destroy();
                 delete this.child_iframes[key];
             }
         }
-
         // Move to next sibling
-        cnode = MirrorDom.Util.apply_ignore_nodes(cnode.nextSibling);
-        ipath[ipath.length-1]++;
+        cnode = MirrorDom.next_element(cnode.nextSibling);
+        ipath[ipath.length - 1]++;
     }
-}
+};
 
 /**
+ * Compare properties
  */
-MirrorDom.Broadcaster.prototype.handle_diff_node_properties = function(diffs, ipath, dnode, cnode) {    
-    var changed_props = {};
-    var removed_props = [];
+MirrorDom.Broadcaster.prototype.handle_diff_node_properties =
+function(diffs, ipath, dnode, cnode) {
+    var changed = {};
+    var removed = [];
     var diff = false;
 
     // include properties that aren't reflected as DOM attributes
-    var property_lookup_list = MirrorDom.Util.get_property_lookup_list(dnode);
-    for (i=0; i < property_lookup_list.length; i++) {
-        var prop_key = property_lookup_list[i][0];
-        var prop_lookup = property_lookup_list[i][1];
-        var dprop_result = MirrorDom.Util.get_property(dnode, prop_lookup);
+    var property_list = MirrorDom.get_property_list(dnode);
+    for (i = 0; i < property_list.length; i++) {
+        var prop_key = property_list[i][0];
+        var prop_lookup = property_list[i][1];
+        var dprop_result = MirrorDom.get_property(dnode, prop_lookup);
         var dprop_found = dprop_result[0];
         var dprop_value = dprop_result[1];
-
         var cprop_found = cnode.props != null ? prop_key in cnode.props : false;
         var cprop_value = cnode.props != null ? cnode.props[prop_key] : null;
-
         if (dprop_found && !cprop_found) {
-            if (dprop_value == "") {
-                // Yeah, it's not really worthy of keeping is it
+            if (dprop_value == '') {
                 continue;
             }
             // Property added
-            changed_props[prop_key] = dprop_value;          
+            changed[prop_key] = dprop_value;
             diff = true;
         } else if (!dprop_found && cprop_found) {
             // Property removed
-            removed_props.push(prop_key);
+            removed.push(prop_key);
             diff = true;
         } else if (cprop_found && dprop_found && dprop_value != cprop_value) {
             // Property changed
-            changed_props[prop_key] = dprop_value;          
+            changed[prop_key] = dprop_value;
             diff = true;
         }
     }
 
     if (diff) {
-        var type = MirrorDom.Util.get_node_doc_type(dnode); // html or svg
-        diffs.push(['props', type, ipath.slice(), changed_props, removed_props]);
+        var type = MirrorDom.determine_node_doc_type(dnode); // html or svg
+        diffs.push(['props', type, ipath.slice(), changed, removed]);
     }
-}
+};
 
-
-MirrorDom.Broadcaster.prototype.handle_diff_node_attributes = function(diffs, ipath, dnode, cnode) {    
-    var diff_attribs = {};
-    var dattribs = {};
-
-    var cattribs = cnode.attributes;
+/**
+ * Compare attributes
+ */
+MirrorDom.Broadcaster.prototype.handle_diff_node_attributes =
+function(diffs, ipath, dnode, cnode) {
     var diff = false;
-    var key;
-    var attrib;
-
-    var changed_attribs = {}
-    var removed_attribs = [];
+    var changed = {};
+    var removed = [];
 
     if (dnode.attributes == null) {
-        //if (cnode.attributes != null) {
-        //    throw new Error("cnode has attributes but dnode doesn't?");
-        //}
         return;
     }
 
     // convert .attributes map to an object dict
     for (var i = 0; i < dnode.attributes.length; i++) {
-
         // For Internet Explorer: style attrib is always null
-        if (dnode.attributes[i].name in MirrorDom.Util.IGNORE_ATTRIBS) {
+        if (MirrorDom.should_ignore_attribute(dnode.nodeName,
+                    dnode.attributes[i].name)) {
             continue;
         }
-
         // IE hack for "specified" attributes (where .attributes contains
         // the entire set of possible attributes)
         if (!dnode.attributes[i].specified) { continue; }
         var dattrib_name = dnode.attributes[i].name;
         var dattrib_value = dnode.attributes[i].nodeValue;
-        if (dattrib_value != cattribs[dattrib_name]) {
+        if (dattrib_value != cnode.attributes[dattrib_name]) {
             // Either it's been changed or it was added
-            changed_attribs[dattrib_name] = dattrib_value;
+            changed[dattrib_name] = dattrib_value;
             diff = true;
         }
     }
@@ -838,27 +846,65 @@ MirrorDom.Broadcaster.prototype.handle_diff_node_attributes = function(diffs, ip
     // Note: cnode is just a straight up associative dict object (see
     // clone_node()).
     for (var key in cnode.attributes) {
-        
         // For Internet Explorer: style attrib is always null
-        if (key in MirrorDom.Util.IGNORE_ATTRIBS) {
+        if (MirrorDom.should_ignore_attribute(cnode.nodeName, key)) {
             continue;
         }
-
         // Note: Because of clone_node's attribute copying, the attribute
         // values are actually attribute nodes. That might not be such a good
         // thing? Maybe I'll have to fix that later
         if (!cnode.attributes[key].specified) { continue; }
-        //var cattrib_name = cnode.attributes[key].name;
         var cattrib_value = cnode.attributes[key].nodeValue;
         if (dnode.attributes[key] == undefined) {
-            removed_attribs.push(cattrib_name);
+            removed.push(cattrib_name);
             diff = true;
         }
     }
 
     if (diff) {
-        var type = MirrorDom.Util.get_node_doc_type(dnode); // html or svg
-        diffs.push(['attribs', type, ipath.slice(), changed_attribs, removed_attribs]);
+        var type = MirrorDom.determine_node_doc_type(dnode); // html or svg
+        diffs.push(['attribs', type, ipath.slice(), changed, removed]);
+    }
+};
+
+
+/**
+ * Compare tail text and child text
+ */
+MirrorDom.Broadcaster.prototype.handle_diff_node_text =
+function(diffs, ipath, dnode, cnode) {
+    /**
+     * Compare sequences of text nodes
+     */
+    var text_nodes_equal = function(d, c) {
+        d = MirrorDom.next_text_node(d);
+        c = MirrorDom.next_text_node(c);
+        while (true) {
+            if (d == null || c == null) {
+                return (d == null && c == null);
+            } else if (d.nodeValue != c.nodeValue) {
+                return false;
+            }
+            d = MirrorDom.next_text_node(d.nextSibling);
+            c = MirrorDom.next_text_node(c.nextSibling);
+        }
+    };
+
+    // Compare tail
+    var tail_diff = null;
+    if (!text_nodes_equal(dnode.nextSibling, cnode.nextSibling)) {
+        tail_diff = MirrorDom.get_text_node_content(dnode.nextSibling);
+    }
+
+    // Compare child
+    var child_diff = null;
+    if (!text_nodes_equal(dnode.firstChild, cnode.firstChild)) {
+        child_diff = MirrorDom.get_text_node_content(dnode.firstChild);
+    }
+
+    if (tail_diff != null || child_diff != null) {
+        var type = MirrorDom.determine_node_doc_type(dnode); // html or svg
+        diffs.push(['text', type, ipath.slice(), tail_diff, child_diff]);
     }
 };
 
@@ -872,39 +918,39 @@ MirrorDom.Broadcaster.prototype.log = function(msg) {
     if (this.debug && window.console && console.log) {
         console.log(msg);
     }
-}
+};
 
 // ============================================================================
 // DOM iterator class
 // ============================================================================
 
 /**
- * @param base_ipath    If iterating through a subset of a document, then
- *                      base_ipath is the path to the root.
- *                      Will be passed to the handlers along with the relative
- *                      path.
+ * @param {array} base_ipath    If iterating through a subset of a document,
+ *                              then base_ipath is the path to the root.  Will
+ *                              be passed to the handlers along with the
+ *                              relative path.
  */
 MirrorDom.DomIterator = function(root, base_ipath) {
     this.root = root;
     this.base_ipath = base_ipath === undefined ? [] : base_ipath;
     this.handlers = [];
-}
+};
 
 /**
- * @param handler           A callback which accepts the following arguments:
- *                          (node, base_ipath, ipath, data)
- * @param data              A mutable data object to pass back to the handler,
- *                          or null if not using
+ * @param {function} handler    Callback which accepts the following arguments:
+ *                              (node, base_ipath, ipath, data).
+ * @param {object} data         A mutable data object to pass back to the
+ *                              handler, or null.
  */
-MirrorDom.DomIterator.prototype.attach_handler = function(handler, data) {
+MirrorDom.DomIterator.prototype.add_handler = function(handler, data) {
     this.handlers.push([handler, data]);
-}
+};
 
 MirrorDom.DomIterator.prototype.log = function(msg) {
     if (window.console && console.log) {
-        console.log(msg); 
+        console.log(msg);
     }
-}
+};
 
 /**
  * Returns the next node.
@@ -921,7 +967,7 @@ MirrorDom.DomIterator.prototype.run = function() {
 
             // Traverse into child
             var next_child = node.firstChild ?
-                MirrorDom.Util.apply_ignore_nodes(node.firstChild) : null;
+                MirrorDom.next_element(node.firstChild) : null;
             if (next_child != null) {
                 node = next_child;
                 ipath.push(0);
@@ -936,10 +982,10 @@ MirrorDom.DomIterator.prototype.run = function() {
         }
 
         // No child, try traverse into sibling
-        var next_sibling = MirrorDom.Util.apply_ignore_nodes(node.nextSibling);
+        var next_sibling = MirrorDom.next_element(node.nextSibling);
         if (next_sibling != null) {
             node = next_sibling;
-            ipath[ipath.length-1]++;
+            ipath[ipath.length - 1]++;
         } else {
             // Reached the end of siblings, ascend parent or terminate
             node = node.parentNode;
@@ -947,53 +993,56 @@ MirrorDom.DomIterator.prototype.run = function() {
             ascending = true;
         }
     }
-}
+};
 
 MirrorDom.DomIterator.prototype.apply_handlers = function(node, ipath) {
-    for (var i=0; i < this.handlers.length; i++) {
+    for (var i = 0; i < this.handlers.length; i++) {
         var f = this.handlers[i][0];
         var data = this.handlers[i][1];
         f(node, this.base_ipath, ipath, data);
     }
-}
+};
 
 // ----------------------------------------------------------------------------
 // DOM iterator helpers
 // ----------------------------------------------------------------------------
 /**
- * @param data      Data should be an array
+ * @param {array} data          Data should be an array which we'll populate.
  */
-MirrorDom.Broadcaster.prototype.collect_props_from_dom_iterator = function(node, base_ipath, ipath, data) {
+MirrorDom.Broadcaster.prototype.collect_props_from_dom_iterator =
+function(node, base_ipath, ipath, data) {
     if (node.nodeType == 1) {
-        var props = MirrorDom.Util.get_properties(node);
+        var props = MirrorDom.get_properties(node);
         if (props != null) {
-            var type = MirrorDom.Util.get_node_doc_type(node); // html or svg
+            var type = MirrorDom.determine_node_doc_type(node); // html or svg
             data.push([type, ipath.slice(), props]);
         }
     }
-}
+};
 
 /**
  * When encountering a new node, see if it's an iframe and if so, register it.
  *
  * To be used with the DomIterator class.
  */
-MirrorDom.Broadcaster.prototype.find_iframes_from_dom_iterator = function(node, base_ipath, ipath) {
+MirrorDom.Broadcaster.prototype.find_iframes_from_dom_iterator =
+function(node, base_ipath, ipath) {
     var full_path = base_ipath.concat(ipath);
     if (node.nodeName.toLowerCase() == 'iframe') {
         this.register_new_iframe(node, full_path);
     }
-}
+};
 
-MirrorDom.Broadcaster.prototype.rewrite_targets_in_dom_iterator = function(node, base_ipath, ipath) {
+MirrorDom.Broadcaster.prototype.rewrite_targets_in_dom_iterator =
+function(node, base_ipath, ipath) {
     var node = jQuery(node);
-    //this.log("Node: " + MirrorDom.Util.describe_node(node[0]));
-    if (node.attr("target") == "_top") {
+    //this.log("Node: " + MirrorDom.describe_node(node[0]));
+    if (node.attr('target') == '_top') {
         var iframe_name = this.iframe.name;
-        node.attr("target", iframe_name);
-        this.log("Rewrote a target attribute while iterating");
+        node.attr('target', iframe_name);
+        this.log('Rewrote a target attribute while iterating');
     }
-}
+};
 
 // ----------------------------------------------------------------------------
 // Tranport
@@ -1001,13 +1050,13 @@ MirrorDom.Broadcaster.prototype.rewrite_targets_in_dom_iterator = function(node,
 
 /* JQuery-XHR implementation of server push - we just POST all the data to
  * root_url + the method name */
- 
+
 MirrorDom.JQueryXHRPusher = function(root_url) {
     this.root_url = root_url;
 };
 
 /**
- * @param args      Either a mapping or a string
+ * @param {object or string} args       Either a mapping or a string.
  */
 MirrorDom.JQueryXHRPusher.prototype.push = function(method, args, callback) {
     for (var k in args) {

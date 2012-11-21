@@ -292,16 +292,33 @@ class TestFirefox(util.TestBrowserBase):
     def _create_webdriver(cls):
         return util.get_debug_firefox_webdriver()
 
+    # --------------------------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------------------------
     def compare_frames(self):
-        broadcaster_html = self.webdriver.execute_script("return get_broadcaster_html()")
+        broadcaster_html = self.webdriver.execute_script(
+                "return get_broadcaster_html()")
         viewer_html = self.webdriver.execute_script("return get_viewer_html()")
-
-        #print "Broadcaster: %s" % (broadcaster_html)
-        #print "Viewer: %s" % (viewer_html)
-
-        # html5parser mangles the input too much, disable it
         return self.compare_html(broadcaster_html, viewer_html, clean=True)
 
+    def apply_viewer_html(self, html):
+        self.execute_script("""
+            var de = viewer.get_document_element();
+            viewer.apply_document(de, arguments[0]);
+        """, html)
+
+    def apply_viewer_diff(self, diffs):
+        self.execute_script("""
+            viewer.apply_diffs(null, JSON.parse(arguments[0]));
+        """, json.dumps(diffs))
+
+    def get_broadcaster_diff(self):
+        result = self.execute_script("return JSON.stringify(broadcaster.get_diff());")
+        return json.loads(result)
+
+    # --------------------------------------------------------------------------
+    # Tests
+    # --------------------------------------------------------------------------
     def test_init_html(self):
         """
         Test 1: Basic HTML transfer
@@ -310,15 +327,12 @@ class TestFirefox(util.TestBrowserBase):
         test. It may or may not be a simple string.
         """
         self.init_webdriver()
-        init_html = self.webdriver.execute_script(
-                "return test_1_get_broadcaster_document()")
-        init_html = json.loads(init_html)
+        init_html = self.execute_script("""
+            var data = broadcaster.start_document();
+            return data['html'];
+        """)
         result_html = mirrordom.server.sanitise_document(init_html)
-        print "==RESULT HTML=="
-        print json.dumps(result_html)
-        self.webdriver.execute_script("test_1_apply_viewer_document(arguments[0])",
-                result_html)
-
+        self.apply_viewer_html(result_html)
         assert self.compare_frames()
 
     def test_diff_transfer(self):
@@ -330,14 +344,14 @@ class TestFirefox(util.TestBrowserBase):
         self.test_init_html()
 
         # Now let's go further and modify the document
-        self.webdriver.execute_script("test_2_modify_broadcaster_document()")
-        diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
-        diff = json.loads(diff)
+        self.webdriver.execute_script("""
+            broadcaster_iframe.contentWindow.add_div();
+        """)
+        diff = self.get_broadcaster_diff()
         print "==DIFF=="
         print json.dumps(diff)
         diff = mirrordom.server.sanitise_diffs(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
-
+        self.apply_viewer_diff(diff)
         assert self.compare_frames()
 
     def test_all_property_transfer(self):
@@ -350,8 +364,9 @@ class TestFirefox(util.TestBrowserBase):
         self.test_init_html()
 
         # Now let's go further and modify the document
-        self.webdriver.execute_script("test_3_modify_broadcaster_document_with_css()")
-        #self.webdriver.execute_script("test_3_modify_broadcaster_document_with_property()")
+        self.webdriver.execute_script("""
+            broadcaster_iframe.contentWindow.change_some_css();
+        """)
 
         # Change text input value property
         new_input_value = "dfkjgopi"
@@ -360,7 +375,10 @@ class TestFirefox(util.TestBrowserBase):
         input.send_keys(new_input_value)
 
         self.webdriver.switch_to_default_content()
-        diff = self.webdriver.execute_script("return test_3_get_broadcaster_all_property_diffs()")
+        diff = self.execute_script("""
+            var data = broadcaster.start_document();
+            return JSON.stringify(data["props"]);
+        """)
         diff = json.loads(diff)
 
         # Only properties
@@ -374,7 +392,7 @@ class TestFirefox(util.TestBrowserBase):
         diff = mirrordom.server.sanitise_diffs(diff)
 
         # We can reuse test 2's diff apply thing
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.apply_viewer_diff(diff)
 
         # Verify the diff made it through
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -437,12 +455,12 @@ class TestFirefox(util.TestBrowserBase):
         self.test_init_html()
 
         # Now let's go further and modify the document
-        self.webdriver.execute_script("test_5_modify_broadcaster_document_insert_element()")
-        diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
-        diff = json.loads(diff)
-        print diff
+        self.webdriver.execute_script("""
+            broadcaster_iframe.contentWindow.insert_div();
+        """)
+        diff = self.get_broadcaster_diff()
         diff = mirrordom.server.sanitise_diffs(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.apply_viewer_diff(diff)
         assert self.compare_frames()
 
     def test_diff_transfer_inserted_table(self):
@@ -453,11 +471,12 @@ class TestFirefox(util.TestBrowserBase):
         # Replicate the initial test
         self.test_init_html()
         # Now let's go further and modify the document
-        self.webdriver.execute_script("test_6_modify_broadcaster_document_insert_table()")
-        diff = self.webdriver.execute_script("return test_2_get_broadcaster_diff()")
-        diff = json.loads(diff)
+        self.webdriver.execute_script("""
+            broadcaster_iframe.contentWindow.insert_table();
+        """)
+        diff = self.get_broadcaster_diff()
         diff = mirrordom.server.sanitise_diffs(diff)
-        self.webdriver.execute_script("test_2_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.apply_viewer_diff(diff)
         assert self.compare_frames()
 
 class TestIE(TestFirefox):

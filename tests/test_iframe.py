@@ -38,6 +38,9 @@ class TestFirefox(util.TestBrowserBase):
     def _create_webdriver(cls):
         return util.get_debug_firefox_webdriver()
 
+    # --------------------------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------------------------
     def compare_inner_iframes(self, iframe_name):
         # Grab the broadcaster's iframes
         self.webdriver.switch_to_default_content()
@@ -53,49 +56,58 @@ class TestFirefox(util.TestBrowserBase):
 
         return self.compare_html(source_iframe_html, dest_iframe_html, clean=True)
 
-    #def compare_frames(self):
-    #    broadcaster_html = self.webdriver.execute_script("return get_broadcaster_html()")
-    #    viewer_html = self.webdriver.execute_script("return get_viewer_html()")
+    def init_broadcaster_state(self):
+        self.execute_script("broadcaster.start_document();")
 
-    #    #print "Broadcaster: %s" % (broadcaster_html)
-    #    #print "Viewer: %s" % (viewer_html)
-    #    return self.compare_html(broadcaster_html, viewer_html, clean=True)
+    def fetch_iframe_paths(self):
+        paths = self.execute_script("""
+            var iframe_paths = [];
+            for (key in broadcaster.child_iframes) {
+                iframe_paths.push(broadcaster.child_iframes[key]["ipath"]);
+            }
+            return iframe_paths;
+        """)
+        return paths
 
-    #def test_init_html(self):
-    #    """
-    #    Test 1: Basic HTML transfer
+    def get_broadcaster_diff(self):
+        result = self.execute_script("return JSON.stringify(broadcaster.get_diff());")
+        return json.loads(result)
 
-    #    Note: We don't want to verify the document transmit format in this
-    #    test. It may or may not be a simple string.
-    #    """
-    #    self.init_webdriver()
+    def process_and_get_broadcaster_messages(self):
+        result = self.execute_script("""
+           var messages = [];
+           broadcaster.process_and_get_messages(messages);
+           // Iframe listings are now a necessary part of every update
+           var iframes = broadcaster.get_all_iframe_paths();
+           return JSON.stringify({"messages": messages, "iframes": iframes});
+        """)
+        return json.loads(result)
 
-    #    init_html_json = self.webdriver.execute_script(
-    #            "return test_1_get_broadcaster_document()")
-    #    init_html = json.loads(init_html_json)
-    #    result_html = mirrordom.server.sanitise_document(init_html)
-    #    result_html_json = json.dumps(result_html)
-    #    self.webdriver.execute_script("test_1_apply_viewer_document(arguments[0])",
-    #            result_html_json)
+    def apply_viewer_updates(self, updates):
+        self.execute_script("""
+            var updates = JSON.parse(arguments[0]);
+            viewer.receive_updates(updates);
+        """, json.dumps(updates))
 
-    #    assert self.compare_frames()
-
+    # --------------------------------------------------------------------------
+    # Tests
+    # --------------------------------------------------------------------------
     def test_detect_standard_iframe(self):
         """ Test 1: Make sure we find standard iframe """
         self.init_webdriver()
-        self.webdriver.execute_script("test_1_start_broadcaster_document()")
-        result = self.webdriver.execute_script("return test_1_fetch_iframe_paths()")
-        result = json.loads(result)
+        self.init_broadcaster_state()
+        result = self.fetch_iframe_paths()
         assert len(result) == 1
         assert result[0] == [1,4]
 
     def test_detect_dynamic_iframe(self):
         """ Test 2: Make sure we find dynamic iframe """
         self.init_webdriver()
-        self.webdriver.execute_script("test_2_add_dynamic_iframe()")
-        self.webdriver.execute_script("test_1_start_broadcaster_document()")
-        result = self.webdriver.execute_script("return test_1_fetch_iframe_paths()")
-        result = json.loads(result)
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.add_dynamic_iframe();
+        """)
+        self.init_broadcaster_state()
+        result = self.fetch_iframe_paths()
         assert len(result) == 2
         assert [1,1,0] in result
 
@@ -104,20 +116,22 @@ class TestFirefox(util.TestBrowserBase):
         self.init_webdriver()
         # Let's start from where test 2 left ovff
         self.test_detect_dynamic_iframe()
-        self.webdriver.execute_script("test_3_remove_all_iframes()")
-        self.webdriver.execute_script("test_3_get_diff()")
-        result = self.webdriver.execute_script("return test_1_fetch_iframe_paths()")
-        result = json.loads(result)
+        self.webdriver.execute_script("""
+            broadcaster_iframe.contentWindow.remove_all_iframes();
+        """)
+        diffs = self.get_broadcaster_diff()
+        result = self.fetch_iframe_paths()
         assert result == []
 
     def test_modify_iframe_path(self):
         """ Test 4: Check if iframe paths are updated after DOM operations """
         self.init_webdriver()
-        self.webdriver.execute_script("test_1_start_broadcaster_document()")
-        self.webdriver.execute_script("test_4_insert_element_at_start()")
-        self.webdriver.execute_script("test_3_get_diff()")
-        result = self.webdriver.execute_script("return test_1_fetch_iframe_paths()")
-        result = json.loads(result)
+        self.init_broadcaster_state()
+        self.webdriver.execute_script("""
+            broadcaster_iframe.contentWindow.add_div_at_start();
+        """)
+        diffs = self.get_broadcaster_diff()
+        result = self.fetch_iframe_paths()
         assert len(result) == 1
         assert result[0] == [1,5]
 
@@ -128,13 +142,12 @@ class TestFirefox(util.TestBrowserBase):
         self.init_webdriver()
 
         # Let's just throw in the dynamic iframe for good measure
-        self.webdriver.execute_script("test_2_add_dynamic_iframe()")
-        #self.webdriver.execute_script("test_1_start_broadcaster_document()")
-        messages = self.webdriver.execute_script(
-                "return test_5_process_and_get_messages()");
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.add_dynamic_iframe();
+        """)
 
+        messages = self.process_and_get_broadcaster_messages()
         # Dictionary of "messages" and "iframes"
-        messages = json.loads(messages)
         print messages["iframes"]
 
         # These are the frames that we expect from the broadcaster
@@ -178,8 +191,7 @@ class TestFirefox(util.TestBrowserBase):
         storage = self.storage
         updates = mirrordom.server.handle_get_update(storage)
         print "Updates: %s" % (updates)
-        self.webdriver.execute_script("test_7_apply_updates(arguments[0])",
-                json.dumps(updates))
+        self.apply_viewer_updates(updates)
         assert self.compare_inner_iframes('theiframe')
         assert self.compare_inner_iframes('thedynamiciframe')
 
@@ -191,10 +203,10 @@ class TestFirefox(util.TestBrowserBase):
         # Set from test_process_mirrordom_iframe_messages
         storage = self.storage
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_insert_element_at_start()")
-        messages = self.webdriver.execute_script(
-                "return test_5_process_and_get_messages()");
-        messages = json.loads(messages)
+        self.webdriver.execute_script("""
+            broadcaster_iframe.contentWindow.add_div_at_start();
+        """)
+        messages = self.process_and_get_broadcaster_messages()
         print "===Messages 2:===\n\n"
         print pprint.pformat(messages)
         mirrordom.server.handle_send_update(storage, messages["messages"],
@@ -214,8 +226,7 @@ class TestFirefox(util.TestBrowserBase):
         self.test_send_update_messages2()
         storage = self.storage
         updates = mirrordom.server.handle_get_update(storage)
-        self.webdriver.execute_script("test_7_apply_updates(arguments[0])",
-                json.dumps(updates))
+        self.apply_viewer_updates(updates)
         # Yep, have to wait a bit
         time.sleep(0.5)
         assert self.compare_inner_iframes('theiframe')
@@ -256,8 +267,7 @@ class TestFirefox(util.TestBrowserBase):
             "last_change_id": 12345,
         }
 
-        self.webdriver.execute_script("test_7_apply_updates(arguments[0])",
-                json.dumps(updates));
+        self.apply_viewer_updates(updates)
 
         self.webdriver.switch_to_default_content()
         self.webdriver.switch_to_frame('viewer_iframe')

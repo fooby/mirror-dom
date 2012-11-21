@@ -4,6 +4,7 @@ Testing the javascript functionality of the mirrordom library
 
 import json
 import os
+import re
 import time
 
 import nose.plugins.skip
@@ -28,17 +29,58 @@ class TestFirefox(util.TestBrowserBase):
     def _create_webdriver(cls):
         return util.get_debug_firefox_webdriver()
 
+    # --------------------------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------------------------
+
+    def setup_viewer_iframe_document(self,
+            src="test_mirrordom_javascript_content_sanitised.html"):
+        self.execute_script("viewer_iframe.src = arguments[0];", src)
+
+    def get_viewer_html(self, fix_newlines=True):
+        viewer_html = self.execute_script("""
+            var de = viewer.get_document_element();
+            return MirrorDom.outerhtml(de);
+        """)
+        if fix_newlines:
+            viewer_html = viewer_html.replace('\r\n', '\n')
+        return viewer_html
+
+    def init_broadcaster_state(self):
+        self.execute_script("broadcaster.make_dom_clone();")
+
+    def get_broadcaster_diff(self):
+        result = self.execute_script("return JSON.stringify(broadcaster.get_diff());")
+        return json.loads(result)
+
+    def apply_viewer_diff(self, diffs):
+        self.execute_script("""
+            viewer.apply_diffs(null, JSON.parse(arguments[0]));
+        """, json.dumps(diffs))
+
+    def apply_viewer_html(self, html):
+        self.execute_script("""
+            var de = viewer.get_document_element();
+            viewer.apply_document(de, arguments[0]);
+        """, html)
+
+    # --------------------------------------------------------------------------
+    # Tests
+    # --------------------------------------------------------------------------
     def test_webdriver_works(self):
         """ Test 0: Sometimes this is the real problem """
         self.init_webdriver()
-        value = self.webdriver.execute_script("return 1")
+        value = self.execute_script("return 1")
 
     def test_fetch_document(self):
         """ Test 1: Just make sure fetching works """
         self.init_webdriver()
 
         # Right now, browser_html should be the raw inner html
-        browser_html = self.webdriver.execute_script("return test_1_get_broadcaster_document()")
+        browser_html = self.execute_script("""
+            var data = broadcaster.start_document();
+            return data['html'];
+        """)
 
         # Internet explorer values contain windows line endings
         browser_html = browser_html.replace('\r\n', '\n')
@@ -101,31 +143,38 @@ class TestFirefox(util.TestBrowserBase):
         """ Test 2: Apply document to viewer """
         self.init_webdriver()
         desired_html = self.TEST_APPLY_DOCUMENT
-        self.webdriver.execute_script("test_2_apply_document(arguments[0])", desired_html)
-        viewer_html = self.webdriver.execute_script("return get_viewer_html()")
-        # Internet explorer values contain windows line endings
-        viewer_html = viewer_html.replace('\r\n', '\n')
+        self.execute_script("""
+            var de = viewer.get_document_element();
+            viewer.apply_document(de, arguments[0]);
+        """, desired_html)
 
-        print desired_html
+        viewer_html = self.get_viewer_html()
         assert self.compare_html(desired_html, viewer_html, clean=True)
 
     def test_get_diff_add_node(self):
         """ Test 3: Diff of adding a node """
         self.init_webdriver()
-        # This triggers clone_dom() in the broadcaster js object, so that diffing works
-        self.webdriver.execute_script("test_3_modify_broadcaster_document_with_add_node()")
-        diffs = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
+        self.init_broadcaster_state()
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.add_div(); // Defined in test_mirrordom_javascript_content.html
+        """)
+        diffs = self.get_broadcaster_diff()
+
         print "Diff: %s" % (diffs)
 
         # Expected result should be identical to:
         # [[u'node', [1,5], u'<div title="title goes here" onclick="alert('hi')">Hello everybody</div>',
         #       [[u'props', [], {u'style.cssText': u'background-color: blue;'}, None]]]]
 
+        # Diff should be similar to:
+        #[[u'node', u'html', [1, 7], u'<div onclick="alert(\'hi\')" title="title goes here" style="background-color: blue;">Hello everybody</div>',
+        #       u'', [[u'html', [], {u'style.cssText': u'background-color: blue;'}]]]]
         EXPECTED_NODE_HTML = """<div title="title goes here" onclick="alert('hi')">Hello everybody</div>"""
 
         assert len(diffs) == 1
         html = diffs[0][3]
-        props = diffs[0][4]
+        tail_text = diffs[0][4]
+        props = diffs[0][5]
 
         # Warning: innerHTML works different between different browsers
         # (i.e. IE will mangle innerHTML with dynamic property updates we can't
@@ -145,14 +194,29 @@ class TestFirefox(util.TestBrowserBase):
     def test_apply_add_node_diff(self):
         """ Test 4: Apply a simple add node diff """
         self.init_webdriver()
-        diff = [[u'node', 'html', [1, 4], u'<div style="background-color: red">Hello There</div>', []]]
-        self.webdriver.execute_script("test_4_setup_viewer_document()")
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.setup_viewer_iframe_document()
+        div_id = "LASDFSDKLFJLSDK"
+        tail_text = "SHIL:SDHGLSDG"
+        diff = [[u'node', 'html', [1, 4],
+                 u'<div id="%s" style="background-color: red">Hello There</div>' % (div_id),
+                 tail_text, []]]
+        self.apply_viewer_diff(diff)
+
+        self.webdriver.switch_to_frame('viewer_iframe')
+        div = self.webdriver.find_element_by_id(div_id)
+        assert div is not None
+        # Slightly dodgy, can't really verify that it's after the div
+        div_parent = div.find_element_by_xpath("..")
+        assert tail_text in div_parent.text
 
     def test_get_initial_property_diff(self):
         """ Test 5: Retrieve initial property diff """
         self.init_webdriver()
-        result = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
+        result = self.execute_script("""
+            var data = broadcaster.start_document();
+            return JSON.stringify(data["props"]);
+        """)
+        result = json.loads(result)
         print result
 
         # CSS rules only
@@ -172,8 +236,11 @@ class TestFirefox(util.TestBrowserBase):
     def test_get_diff_styles(self):
         """ Test 6: Retrieve document with dynamically modified styles """
         self.init_webdriver()
-        self.webdriver.execute_script("test_6_modify_broadcaster_document_with_css()")
-        result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
+        self.init_broadcaster_state()
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.change_some_css();
+        """)
+        result = self.get_broadcaster_diff()
         print result
 
         # Extra class added, plus css background-color
@@ -182,15 +249,18 @@ class TestFirefox(util.TestBrowserBase):
     def test_get_diff_attributes(self):
         """ Test 7: Diff of attributes """
         self.init_webdriver()
-        self.webdriver.execute_script("test_7_modify_broadcaster_document_with_attribute()")
-        result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
+        self.init_broadcaster_state()
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.change_some_attribute();
+        """)
+        result = self.get_broadcaster_diff()
         print result
         assert len(result) > 0
 
     def test_get_diff_properties(self):
         """ Test 8: Diff of properties """
         self.init_webdriver()
-        self.webdriver.execute_script("test_3_force_dom_clone()")
+        self.init_broadcaster_state()
 
         new_value = "-ae9ij"
 
@@ -198,11 +268,11 @@ class TestFirefox(util.TestBrowserBase):
         self.webdriver.switch_to_frame('broadcaster_iframe')
         input = self.webdriver.find_element_by_id('thetextinput')
         input.send_keys(new_value)
-        #self.webdriver.execute_script("test_8_modify_broadcaster_document_with_property()")
+        #self.execute_script("test_8_modify_broadcaster_document_with_property()")
 
         # Get the diff
         self.webdriver.switch_to_default_content()
-        result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
+        result = self.get_broadcaster_diff()
         print result
 
         # Should be there
@@ -211,8 +281,11 @@ class TestFirefox(util.TestBrowserBase):
     def test_get_diff_delete_node(self):
         """ Test 9: Diff of deleting nodes """
         self.init_webdriver()
-        self.webdriver.execute_script("test_9_modify_broadcaster_document_with_delete_node()")
-        result = self.webdriver.execute_script("return test_3_get_broadcaster_diff()")
+        self.init_broadcaster_state()
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.delete_div();
+        """)
+        result = self.get_broadcaster_diff()
         print result
         assert len(result) > 0
 
@@ -223,7 +296,7 @@ class TestFirefox(util.TestBrowserBase):
         # Assuming that the <input id="thetextinput">  element is at position
         # [1,2,0] in test_mirrordom_javascript_content_sanitised.html
         diff = [[u'props', 'html', [1, 2, 0], {u'value': new_value}, None]]
-        self.webdriver.execute_script("test_4_setup_viewer_document()")
+        self.setup_viewer_iframe_document()
 
         # Value should be default to "hello"
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -234,7 +307,7 @@ class TestFirefox(util.TestBrowserBase):
 
         # Ok, change the property
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.apply_viewer_diff(diff)
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -250,8 +323,8 @@ class TestFirefox(util.TestBrowserBase):
         # Assuming that the <table id="thetable">  element is at position
         # [1,1,1] in test_mirrordom_javascript_content_sanitised.html. This should
         # change cellSpacing to 4
-        diff = [[u'attribs', 'html', [1, 1, 1], {u'cellSpacing': new_value}, []]]
-        self.webdriver.execute_script("test_4_setup_viewer_document()")
+        diff = [[u'attribs', 'html', [1, 1, 0], {u'cellSpacing': new_value}, []]]
+        self.setup_viewer_iframe_document()
 
         # Cellspacing shouldn't be set yet
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -262,7 +335,7 @@ class TestFirefox(util.TestBrowserBase):
 
         # Ok, change the attrib
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.apply_viewer_diff(diff)
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -270,19 +343,19 @@ class TestFirefox(util.TestBrowserBase):
         table_cellspacing = table.get_attribute("cellspacing")
         print "Cellspacing after: %s" % (table_cellspacing)
         assert table_cellspacing == new_value
-        
+
     def test_apply_delete_node_diff(self):
         """ Test 12: Apply a delete diff
-        
+
         WARNING: This test is brittle if you're modifying the test HTML
         Try to make sure <div id="thelastelement"> is always the last element
         in the <body>.
         """
         self.init_webdriver()
-        
+
         # This should delete the <a id="textinput"> at the end of the page
         diff = [[u'deleted', 'html', [1, 4]]]
-        self.webdriver.execute_script("test_4_setup_viewer_document()")
+        self.setup_viewer_iframe_document()
 
         # Just make sure it's there first
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -290,7 +363,7 @@ class TestFirefox(util.TestBrowserBase):
         assert div != None
 
         self.webdriver.switch_to_default_content()
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        self.apply_viewer_diff(diff)
 
         # Shouldn't be there now
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -315,7 +388,7 @@ class TestFirefox(util.TestBrowserBase):
         new_value = "sdfgsdfogj"
 
         self.init_webdriver()
-        self.webdriver.execute_script("test_4_setup_viewer_document()")
+        self.setup_viewer_iframe_document()
 
         # Value should be default to "hello"
         self.webdriver.switch_to_frame('broadcaster_iframe')
@@ -328,9 +401,12 @@ class TestFirefox(util.TestBrowserBase):
 
         # Ok, change the property
         self.webdriver.switch_to_default_content()
-        diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
-        print "Diff: %s" % (diff)
-        self.webdriver.execute_script("test_4_apply_viewer_diff(arguments[0])", json.dumps(diff))
+        prop_diffs = self.execute_script("""
+            var data = broadcaster.start_document();
+            return data["props"];
+        """)
+        print "Diff: %s" % (prop_diffs)
+        self.apply_viewer_diff(prop_diffs)
 
         # Now let's check it out
         self.webdriver.switch_to_frame('viewer_iframe')
@@ -342,27 +418,50 @@ class TestFirefox(util.TestBrowserBase):
     def test_jquery_dialog_open(self):
         """ Test 14: Open jquery dialog, get diff """
         self.init_webdriver()
-        self.webdriver.execute_script("test_14_broadcaster_open_jquery_dialog()")
-        diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
-        print "Diff: %s" % (diff)
+        self.init_broadcaster_state()
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.make_and_show_dialog();
+        """)
+        result = self.get_broadcaster_diff()
+        print result
 
     def test_jquery_dialog_close(self):
         """ Test 15: Open jquery dialog, get diff """
         self.test_jquery_dialog_open()
-        diff = self.webdriver.execute_script("return test_5_get_broadcaster_all_property_diff()")
-        print "Diff: %s" % (diff)
+        self.execute_script("""
+            broadcaster_iframe.contentWindow.close_dialog();
+        """)
+        result = self.get_broadcaster_diff()
+        print result
 
     def test_multiple_text_nodes(self):
         """ Test 16: Test multiple consecutive text nodes """
         self.init_webdriver()
         text_nodes = ["multiple ", " text ", "nodes"]
+        add_to_node = [1,1] # <div id="thediv">Blaurgh
+
+        # Before we start...confirm existing text
+
         # Existing text
-        text_1 = self.webdriver.execute_script("""return test_16_broadcaster_get_text_at_path([1,1,0])""")
-        assert text_1.strip() == "Blaurgh"
-        self.webdriver.execute_script("test_16_broadcaster_add_text_nodes(arguments[0])", text_nodes)
-        # Assumes the text is added to div at [1,1] at will be at position 2
-        text_2 = self.webdriver.execute_script("""return test_16_broadcaster_get_text_at_path([1,1,2])""")
-        assert text_2.strip() == "".join(text_nodes)
+        before, after = self.execute_script("""
+            var doc_elem = broadcaster.get_document_element();
+            var text_items = arguments[0];
+            var node = MirrorDom.node_at_path(doc_elem, arguments[1]);
+            var existing_text = MirrorDom.get_text_node_content(node.firstChild);
+            var doc = node.ownerDocument;
+            var insert_before = node.firstChild;
+            for (var i = 0; i < text_items.length; i++) {
+                node.insertBefore(doc.createTextNode(text_items[i]), insert_before);
+            }
+            var updated_text = MirrorDom.get_text_node_content(node.firstChild);
+            return [existing_text, updated_text];
+            """, text_nodes, add_to_node)
+        after = after.replace('\n', '')
+        print "Before: %r\nAfter: %r" % (before, after)
+        assume_before_text = "Blaurgh" # Previous knowledge from our path
+        assert before.strip() == assume_before_text
+        re_pattern = "%s\s*%s" % ("".join(text_nodes), assume_before_text)
+        assert re.search(re_pattern, after.replace('\n', '')) is not None
 
     # Note that I've deliberately omitted <tbody> from the table element, as I
     # want to see what sort of complications ensue
@@ -381,12 +480,11 @@ class TestFirefox(util.TestBrowserBase):
         """ Test 17: Some browsers don't like dynamically created <style>
         elements (i.e. IE8) """
         self.init_webdriver()
+        # Firefox doesn't like it when we go too fast
+        time.sleep(0.1)
         desired_html = self.TEST_APPLY_DOCUMENT_WITH_STYLE_ELEMENT
-        self.webdriver.execute_script("test_2_apply_document(arguments[0])", desired_html)
-        viewer_html = self.webdriver.execute_script("return get_viewer_html()")
-        # Internet explorer values contain windows line endings
-        viewer_html = viewer_html.replace('\r\n', '\n')
-        print desired_html
+        self.apply_viewer_html(desired_html)
+        viewer_html = self.get_viewer_html()
         assert self.compare_html(desired_html, viewer_html, clean=True)
 
 class TestIE(TestFirefox):

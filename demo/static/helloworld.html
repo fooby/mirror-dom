@@ -15,9 +15,18 @@
 
       function spawn() {
           var s = pick_random_item(text);
+          var s2 = pick_random_item(text);
           var c = pick_random_item(colour);
-          $("body").append('<p style="color: ' + c + '">' + s + "</p>");
+          $("body").append('<p style="color: ' + c + '">' + s + "</p> " + s2);
           return false;
+      }
+
+      function change_text() {
+          $("#text_test").html("ZZZZZZZ <script type=\"text/javascript\">null</sc" + "ript> SDFSD");
+      }
+
+      function add_text() {
+          $("#text_test").after("YYYYYYYY");
       }
 
       function make_and_show_dialog() {
@@ -33,6 +42,8 @@
       jQuery(function() {
           $("#spawn").click(spawn);
           $("#dialogbutton").click(make_and_show_dialog);
+          $("#add_text").click(add_text);
+          $("#change_text").click(change_text);
       });
     </script>
   </head>
@@ -48,11 +59,15 @@
         <a href="/static/svg.html">SVG test</a><br/>
       </div>
 
+      <div id="text_test">Bloo</div>
+
       <div>
         <iframe src="/static/iframe_content.html" frameBorder="0"></iframe>
       </div>
       <button id="spawn">Spawn Something</button>
       <button id="dialogbutton">Dialog</button>
+      <button id="add_text">Add text</button>
+      <button id="change_text">Change text</button>
     </div>
   </body>
 </html>
