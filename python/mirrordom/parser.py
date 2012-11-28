@@ -50,6 +50,13 @@ class OuterHTMLParser(HTMLParser):
         "thead":    TABLE_ELEMS,
         "tfoot":    TABLE_ELEMS,
         "colgroup": TABLE_ELEMS,
+        "tr":       set(["tr"]),
+        "td":       set(["td", "th"]),
+        "th":       set(["td", "th"]),
+        "dt":       set(["dt", "dd"]),
+        "dd":       set(["dt", "dd"]),
+        "li":       set(["li"]),
+        "option":   set(["option"]),
     }
 
     #AUTOCLOSE_ON_CLOSE = {
@@ -72,13 +79,26 @@ class OuterHTMLParser(HTMLParser):
         self.root = None
         HTMLParser.__init__(self)
 
+    def find_autoclose_on_open(self, tag):
+        pos = len(self.stack) - 1
+        while pos >= 0:
+            elem = self.stack[pos]
+            try:
+                autoclose_tags = self.AUTOCLOSE_ON_OPEN[elem.tag]
+            except KeyError:
+                break
+            if tag not in autoclose_tags:
+                break
+            elif pos == 0:
+                return 0
+            pos -=1
+        autoclose_count = len(self.stack) - pos
+        return autoclose_count - 1
+
     def check_autoclose_on_open(self, tag):
-        current = self.stack[-1]
-        try:
-            autoclose_tags = self.AUTOCLOSE_ON_OPEN[current.tag]
-        except KeyError:
-            return
-        if tag in autoclose_tags:
+        num_to_close = self.find_autoclose_on_open(tag)
+        for i in range(num_to_close):
+            #logger.debug("Autoclosing: %s due to %s", self.stack[-1].tag, tag)
             self.close_tag(tag, force=True)
 
     # None of our browsers rely on autoclosing...thankfully, they all
@@ -116,7 +136,6 @@ class OuterHTMLParser(HTMLParser):
         else:
             if not self.stack:
                 raise HTMLParseError("Unexpected open tag: %s" % (tag))
-
             self.check_autoclose_on_open(tag)
             parent = self.stack[-1]
             parent.append(new)
@@ -157,6 +176,8 @@ class OuterHTMLParser(HTMLParser):
             raise HTMLParseError("Unexpected close tag at top of tree: %s" % (tag))
         elem = self.stack[-1]
         if not force and elem.tag != tag:
+            #import rpdb2
+            #rpdb2.start_embedded_debugger("hello")
             raise HTMLParseError("Unexpected close tag: %s. Expected: %s" % \
                     (tag, elem.tag))
         self.stack.pop()

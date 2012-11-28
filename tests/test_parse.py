@@ -216,8 +216,8 @@ class TestFirefox(util.TestBrowserBase):
 
     def test_table_autoclose_on_open(self):
         self.init_webdriver()
-        html = """<table><colgroup><col width="100%"><tbody><tr><td>hello</td></tr></tbody></table>"""
-        desired_html = """<table><colgroup><col width="100%"/></colgroup><tbody><tr><td>hello</td></tr></tbody></table>"""
+        html = """<table><colgroup><col width="100%"><tbody><tr><td>hello</td><tr><td>world</td></tbody></table>"""
+        desired_html = """<table><colgroup><col width="100%"/></colgroup><tbody><tr><td>hello</td></tr><tr><td>world</td></tr></tbody></table>"""
         assert self.apply_and_compare(html, desired_html)
 
     def test_table_autoclose_on_close(self):
