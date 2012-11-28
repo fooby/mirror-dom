@@ -21,6 +21,8 @@ except ImportError:
     sys.path.append(util.get_mirrordom_path())
     import mirrordom.server
 
+from mirrordom.parser import parse_html    
+
 def setupModule():
     util.start_webserver()
 
@@ -40,20 +42,27 @@ class TestFirefox(util.TestBrowserBase):
     # --------------------------------------------------------------------------
     # Helpers
     # --------------------------------------------------------------------------
+    def html_to_xml(self, html):
+        tree = parse_html(html)
+        return lxml.etree.tostring(tree)
+
     def compare_inner_iframes(self, iframe_name):
         # Grab the broadcaster's iframes
         self.webdriver.switch_to_default_content()
         self.webdriver.switch_to_frame('broadcaster_iframe')
         source_iframe_html = self.webdriver.execute_script(
-                "return window.document.documentElement.innerHTML")
+                """return ("<html>" + window.document.documentElement.innerHTML + "</html>)""")
+        source_iframe_html = source_iframe_html.replace('\r\n', '\n')
+        source_iframe_xml = self.html_to_xml(source_iframe_html)
 
         # Grab the viewer's iframes
         self.webdriver.switch_to_default_content()
         self.webdriver.switch_to_frame('viewer_iframe')
         dest_iframe_html = self.webdriver.execute_script(
-                "return window.document.documentElement.innerHTML")
-
-        return self.compare_html(source_iframe_html, dest_iframe_html, clean=True)
+                """return ("<html>" + window.document.documentElement.innerHTML + "</html>)""")
+        dest_iframe_html = dest_iframe_html.replace('\r\n', '\n')
+        dest_iframe_xml = self.html_to_xml(dest_iframe_html)
+        return self.compare_html(source_iframe_xml, dest_iframe_xml)
 
     def get_viewer_html(self, fix_newlines=True):
         viewer_html = self.execute_script("""
@@ -102,7 +111,7 @@ class TestFirefox(util.TestBrowserBase):
         """, desired_html)
         # Internet explorer values contain windows line endings
         viewer_html = self.get_viewer_html()
-        assert self.compare_html(desired_html, viewer_html, clean=True)
+        assert self.compare_html(desired_html, viewer_html)
 
     def test_add_svg_node_diff(self):
         """ Test 3: Modify SVG and get diff """

@@ -158,7 +158,7 @@ MirrorDom.Broadcaster.prototype.process_and_get_messages = function(messages) {
 
     // Don't do anything if the document is still loading
     var d = this.get_document();
-    if (d.readyState != 'complete') {
+    if (d.readyState != 'complete' && d.readyState != 'interactive') {
         this.log('Page is loading, skip poll');
         return;
     }
@@ -819,6 +819,8 @@ function(diffs, ipath, dnode, cnode) {
     var changed = {};
     var removed = [];
 
+    var doc_type = MirrorDom.determine_node_doc_type(dnode);
+
     if (dnode.attributes == null) {
         return;
     }
@@ -826,7 +828,7 @@ function(diffs, ipath, dnode, cnode) {
     // convert .attributes map to an object dict
     for (var i = 0; i < dnode.attributes.length; i++) {
         // For Internet Explorer: style attrib is always null
-        if (MirrorDom.should_ignore_attribute(dnode.nodeName,
+        if (MirrorDom.should_ignore_attribute(dnode,
                     dnode.attributes[i].name)) {
             continue;
         }
@@ -847,7 +849,11 @@ function(diffs, ipath, dnode, cnode) {
     // clone_node()).
     for (var key in cnode.attributes) {
         // For Internet Explorer: style attrib is always null
-        if (MirrorDom.should_ignore_attribute(cnode.nodeName, key)) {
+
+        // Note: Passing dnode DELIBERATELY, as dnode is an actual DOM node
+        // whereas cnode is just a plain object. should_ignore_attribute needs
+        // to be passed a DOM node.
+        if (MirrorDom.should_ignore_attribute(dnode, key)) {
             continue;
         }
         // Note: Because of clone_node's attribute copying, the attribute

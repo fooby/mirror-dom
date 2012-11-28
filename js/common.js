@@ -49,7 +49,7 @@ MirrorDom.determine_node_doc_type = function(node) {
 MirrorDom.PROPERTY_NAMES = {
     'html': ['disabled', 'value', 'checked', 'style.cssText', 'className',
              'colSpan'],
-    'svg': [],
+    'svg': ['style.cssText'],
     'vml': ['style.cssText', 'runtimeStyle.cssText', 'path.v',
             'strokeColor.value', 'strokeweight']
 };
@@ -93,7 +93,7 @@ MirrorDom.get_property_list = function(node) {
     var result = [];
     for (var i = 0; i < properties.length; i++) {
         var p = properties[i];
-        if (restrict[p] && !(tag_name in restrict[p])) { continue; }
+        if (restrict && restrict[p] && !(tag_name in restrict[p])) { continue; }
         result.push([p, p.split('.')]);
     }
     if (cached[doc_type] == undefined) { cached[doc_type] = {}; }
@@ -210,14 +210,24 @@ MirrorDom.insert_after = function(new_node, target) {
 
 
 // Ignore certain attributes when doing attribute comparison
-MirrorDom.IGNORE_ATTRIBS = ['style'];
-MirrorDom.IGNORE_ATTRIBS = MirrorDom.to_set(MirrorDom.IGNORE_ATTRIBS);
+MirrorDom.IGNORE_ALL_ATTRIBS = MirrorDom.to_set(['style']);
+MirrorDom.IGNORE_ATTRIBS = {
+    'html': { 'src': MirrorDom.to_set(['iframe']) }
+};
 
 /**
  * Determine if we should skip attribute
  */
-MirrorDom.should_ignore_attribute = function(node_name, attribute) {
-    return (attribute in MirrorDom.IGNORE_ATTRIBS);
+MirrorDom.should_ignore_attribute = function(node, attribute) {
+    if (attribute in MirrorDom.IGNORE_ALL_ATTRIBS) { return true; }
+
+    var doc_type = MirrorDom.determine_node_doc_type(node);
+    var ignore = MirrorDom.IGNORE_ATTRIBS[doc_type];
+    var nodeName = node.nodeName.toLowerCase();
+    if (ignore && ignore[attribute] && nodeName in ignore[attribute]) {
+        return true;
+    }
+    return false;
 };
 
 // ============================================================================
@@ -349,8 +359,11 @@ MirrorDom.copy_xml_node_to_dom = function(doc, root) {
                     elem.setAttribute(attrib.name, attrib.value);
                 }
                 return elem;
+            case 8:
+                var comment = doc.createComment(node.textContent);
+                return comment;
             case 3:
-                var text = doc.createTextNode(node.textContent);
+                var text = doc.createTextNode(node.nodeValue);
                 return text;
             default:
                 // hmm
@@ -681,7 +694,7 @@ MirrorDom.describe_framepath = function(root, framepath) {
             case 'm':
                 // Special case: Should be the root of the main frame document
                 // Ignore this and keep proceeding.
-                if (node.nodeName.toLowerCase() != 'iframe') {
+                if (node.nodeName.toLowerCase() == 'iframe') {
                     var d = MirrorDom.get_iframe_document(node);
                     node = d.documentElement;
                     path_desc.push('m: Descending into main iframe');
@@ -692,7 +705,7 @@ MirrorDom.describe_framepath = function(root, framepath) {
             case 'i':
                 // Descend into iframe - root at this point should be an
                 // iframe, otherwise we got a problem
-                var d = MirrorDom.get_iframe_documenget_iframe_document(node);
+                var d = MirrorDom.get_iframe_document(node);
                 node = d.documentElement;
                 path_desc.push('i: Descending into iframe');
                 break;

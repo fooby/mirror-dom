@@ -6,6 +6,7 @@ import SocketServer
 import threading
 import posixpath
 import logging
+import re
 
 import lxml
 import lxml.doctestcompare
@@ -164,100 +165,324 @@ def get_debug_chrome_webdriver():
     return webdriver.Chrome()
 
 # -----------------------------------------------------------------------------
-# HTML parsing fixes
 
-class LHTMLOutputChecker(lxml.doctestcompare.LHTMLOutputChecker):
-    """ The standard LHTML output checker doesn't use the lxml.html.fromstring
-    parser """
+class CompareException(Exception):
+    def __init__(self, msg, elem1_tree=None, elem1=None,
+            elem2_tree=None, elem2=None):
+        self.msg = msg
+        self.elem1_tree = elem1_tree
+        self.elem2_tree = elem2_tree
+        self.elem1 = elem1
+        self.elem2 = elem2
 
-    def get_parser(self, want, got, optionflags):
-        """ LHTMLOutputChecker """
-        return lxml.html.fromstring
+    def get_elem_desc(self, desc, tree, elem):
+        if elem is not None:
+            return "%s XPath: %s" % (desc, tree.getpath(elem))
+        else:
+            return "%s is None"
 
-def force_insert_tbody(html_tree):
+    def __str__(self):
+        result = self.msg
+        if self.elem1 is not None:
+            result += "\n" + self.get_elem_desc("Element 1", self.elem1_tree, self.elem1)
+        if self.elem2 is not None:
+            result += "\n" + self.get_elem_desc("Element 2", self.elem2_tree, self.elem2)
+        return result
+
+class HTMLComparator(object):
+    """ Compares two HTML trees
+
+    :param strip_text:
+                    Strip surrounding whitespace from text comparison.
+
+    :param ignore_all_whitespace:
+                    Get rid of ALL whitespace in text comparison.
+                    Used to deal with browser whitespace inconsistencies.
+                    This trumps the strip_text option.
+
+    :param ignore_ie_default_attributes:
+                    Force default attributes onto various nodes to
+                    compensate for IE removing attributes at whim
+
+                    e.g. For each, <input> elements without a "type" attribute
+                    we'll force add type="text" attribute forcibly before
+                    the compare.
+
+    :param ignore_hrefs:
+                    Strip HREFs out
+
+    :param ignore_attr_values:
+                    A list of attributes for which we'll ignore comparing the VALUES
+
+    :param strip_localhost_hrefs_for_ie:
+                    IE hrefs tend to prefix with the hostname. This messes
+                    with our comparison, so strip the hostname prefixs. e.g.
+
+                    <a href="http://127.0.0.1:49602/test_dom_sync_content2.html">
+                    will be fixed to
+                    <a href="test_dom_sync_content2.html">
+
+    :param ignore_title:
+                    IE tends to remove any text inside the <title> element,
+                    causing mismatches. We'll just remove it from our
+                    compare documents.
+
+    :param strip_style_attributes:
+                    IE's style attributes are unworkable for comparison
+
+
     """
-    Force insert tbody elements between tables and trs
-    """
-    tables = html_tree.iter('table')
-    for table in tables:
-        tbody = None
-        children = list(table)
-        for c in children:
-            if not isinstance(c.tag, basestring):
-                continue
-            elif c.tag.lower() == "colgroup":
-                continue
-            elif c.tag.lower() == "tbody":
-                tbody = None
-            else:
-                if tbody is None:
-                    tbody = lxml.html.Element('tbody')
-                    c.addprevious(tbody)
-                tbody.append(c)
-    return html_tree
 
-# -----------------------------------------------------------------------------
+    # Options
+    strip_text=True
+    ignore_all_whitespace=False
+    ignore_title=True
+    ignore_script_content=False
+    ignore_ie_default_attributes=True
+    ignore_jquery_attributes=True
+    ignore_attr_values=[]
+    ignore_tags = []
+    ignore_attrs = ['webdriver'] # Selenium injects this attribute
+    ignore_comments = False
+    strip_localhost_hrefs_for_ie = True
 
-# Internet Explorer HTML comparison hacks
+    _IE_NODE_DEFAULTS = {
+        "input": {"size": "50", "type": "text"},
+        "th": {"colspan": "1"},
+        "td": {"colspan": "1"}
+    }
 
-NODE_DEFAULTS = {
-    "input": {"size": "50", "type": "text"},
-    "th": {"colspan": "1"},
-    "td": {"colspan": "1"}
-}
+    _ignore_attr_values = ['style']
+    _ignore_attrs = []
+    _ignore_tags = []
 
-def augment_single_node_defaults_for_ie(node):
-    """ IE stuffs up our InnerHTML by omitting "default" attributes on certain
-    elements
-    
-    e.g. <input type="text" size="50"/>, both the "type" and "size"
-    attributes are default values and gets stripped out.
-    
-    We'll just shove these default values in EVERY eleent where we can to
-    ensure it passes the comparison.
+    def __init__(self, **options):
+        self.logger = logging.getLogger("mirrordom.htmlcompare")
 
+        # Set options
+        for k, v in options.iteritems():
+            if not hasattr(self, k):
+                raise Exception("Unexpected HTMLComparator option: %s" % (k))
+            setattr(self, k, v)
 
-    """
-    logger = logging.getLogger("mirrordom.ie_default_hack")
-    try:
-        defaults = NODE_DEFAULTS[node.tag]
-    except KeyError:
-        return
+        self._ignore_tags = self._ignore_tags[:]
+        self._ignore_attr_values = self._ignore_attr_values[:]
+        self._ignore_attrs = self._ignore_attrs[:]
 
-    for attribute, value in defaults.iteritems():
-        if attribute not in node.attrib:
-            logger.info("Shoving %s=%s into %s!", attribute, value, node.tag)
-            node.attrib[attribute] = value
-            
-def augment_tree_defaults_for_ie(root):
-    """ In place tree modification """
-    for element in root.iter():
-        augment_single_node_defaults_for_ie(element)
+        if self.ignore_attr_values:
+            self._ignore_attr_values.extend(self.ignore_attr_values)
 
-def strip_hrefs(doc):
-    doc.rewrite_links(lambda url: "")
+        if self.ignore_attrs:
+            self._ignore_attrs.extend(self.ignore_attrs)
 
-def strip_localhost_hrefs_for_ie(doc):
-    # rewrite_links only defined on HtmlElement
-    assert isinstance(doc, lxml.html.HtmlElement)
+        # Ignore tags
+        if self.ignore_title:
+            self._ignore_tags.append("title")
+        if self.ignore_tags:
+            self._ignore_tags.extend(self.ignore_tags)
 
-    def strip_hostname(url):
+    @staticmethod
+    def strip_localhost_href(url):
+        """
+        """
         parsed = urlparse.urlparse(url)
         if parsed.hostname == "127.0.0.1":
+
+            # HACK: If the URL ends with we assume the original href was simply "#"
+            if url.endswith("#"):
+                return "#"
+
             result = "".join(parsed[2:]).lstrip("/")
-            #print "Got %s, return %s" % (url, result)
             return result
         else:
-            #print "Got %s, not doing anything" % (url)
             return url
-    doc.rewrite_links(strip_hostname)
 
-def remove_title_for_ie(doc):
-    head = doc.find('head/title')
-    if head is not None:
-        head.getparent().remove(head)
+    def compare_text(self, a, b):
+        if a is None:
+            a = ""
+        if b is None:
+            b = ""
+        if self.ignore_all_whitespace:
+            a = re.sub(r'\s+', '', a)
+            b = re.sub(r'\s+', '', b)
+        elif self.strip_text:
+            a = a.strip()
+            b = b.strip()
+        return a == b
 
-# -----------------------------------------------------------------------------
+    def compare_attrs(self, a, b):
+        assert a.tag.lower() == b.tag.lower()
+
+        def apply_remove_attr(x):
+            a_attrib.pop(x, None)
+            b_attrib.pop(x, None)
+
+        def apply_ignore_attr_values(x):
+           if x in a_attrib: a_attrib[x] = None
+           if x in b_attrib: b_attrib[x] = None
+
+        def apply_setdefault(k, v):
+            a_attrib.setdefault(k, v)
+            b_attrib.setdefault(k, v)
+
+        def remove_jquery_attributes(attrib):
+            remove = [k for k in attrib.keys() if k.startswith('jquery')]
+            for k in remove:
+                attrib.pop(k)
+
+
+        a_attrib = dict(a.attrib)
+        b_attrib = dict(b.attrib)
+
+        # Perform operations
+        if self._ignore_attrs:
+            for k in self._ignore_attrs:
+                apply_remove_attr(k)
+
+        if self.ignore_ie_default_attributes and a.tag in self._IE_NODE_DEFAULTS:
+            default_attrs = self._IE_NODE_DEFAULTS[a.tag]
+            for k, v in default_attrs.iteritems():
+                apply_setdefault(k, v)
+
+        if self._ignore_attr_values:
+            for k in self._ignore_attr_values:
+                apply_ignore_attr_values(k)
+
+        if self.strip_localhost_hrefs_for_ie and a.tag == "a":
+            if 'href' in a_attrib and a_attrib['href'] is not None:
+                a_attrib['href'] = self.strip_localhost_href(a_attrib['href'])
+            if 'href' in b_attrib and b_attrib['href'] is not None:
+                b_attrib['href'] = self.strip_localhost_href(b_attrib['href'])
+
+        if self.ignore_jquery_attributes:                
+            remove_jquery_attributes(a_attrib)
+            remove_jquery_attributes(b_attrib)
+            
+        a_set = set(a_attrib)
+        b_set = set(b_attrib)
+        added = b_set - a_set
+        removed = a_set - b_set
+
+        if added or removed:
+            return False, "Added attributes: [%s] Missing attributes: [%s]" % \
+                    (", ".join(added), ", ".join(removed))
+
+        assert a_set == b_set                    
+        
+        changed = [(k, v, b_attrib[k]) for k, v in a_attrib.iteritems() \
+                if v != b_attrib[k]]
+
+        if changed:
+            diff_strings = ["[%s] %r != %r" % (c) for c in changed]
+            return False, "Values differ...%s" % (", ".join(diff_strings))
+
+        assert a_attrib == b_attrib
+        return True, None
+
+    def should_ignore_elem(self, elem):
+        elem_type = self.get_elem_type(elem)
+        if elem_type == "element":
+            if elem.tag.lower() in self._ignore_tags:
+                return True
+        elif elem_type == "comment":
+            return self.ignore_comments
+        elif elem_type == "pi":
+            return True
+        return False
+
+    def should_ignore_elem_text(self, elem):
+        if self.ignore_script_content and elem.tag.lower() == 'script':
+            return True
+        return False
+
+    def get_next_elem(self, tree_iter):
+        """ Retrieve next element from tree iterator """
+        try:
+            while True:
+                e = tree_iter.next()
+                if not self.should_ignore_elem(e):
+                    return e
+                else:
+                    self.logger.debug("Ignoring element: %s",
+                            lxml.etree.tostring(e))
+        except StopIteration:
+            return None
+
+    def compare_elements(self, elem1, elem2, desired_tree, got_tree):        
+        if elem1.tag.lower() != elem2.tag.lower():
+            raise CompareException(
+                    "Tags are not equal: %s != %s" % (elem1.tag, elem2.tag),
+                    desired_tree, elem1, got_tree, elem2)
+
+        if not self.compare_text(elem1.tail, elem2.tail):
+            raise CompareException(
+                    "Different tail text: %r != %r" % (elem1.tail, elem2.tail),
+                    desired_tree, elem1, got_tree, elem2)
+
+        if not self.should_ignore_elem_text(elem1):
+            if not self.compare_text(elem1.text, elem2.text):
+                raise CompareException(
+                        "Different child text: %r != %r" % (elem1.text, elem2.text),
+                        desired_tree, elem1, got_tree, elem2)
+
+        # Python dictionary key AND value compare
+        success, reason = self.compare_attrs(elem1, elem2)
+        if not success:
+            raise CompareException("Different attributes: %s" % (reason),
+                    desired_tree, elem1, got_tree, elem2)
+
+    def get_elem_type(self, elem):
+        if isinstance(elem.tag, basestring):
+            return "element"
+        elif elem.tag is lxml.etree.Comment:
+            return "comment"
+        elif elem.tag is lxml.etree.ProcessingInstruction:
+            return "pi"
+        else:
+            raise Exception("Unknown element type: %r" % (elem))
+
+
+    def run(self, desired, got):    
+        """ Compare desired HTML to received HTML
+        
+        :param desired:     Desired HTML string
+        :param got:         Received HTML string
+        """
+
+        parse = lambda x: lxml.etree.ElementTree(lxml.etree.fromstring(x))
+        desired_tree = parse(desired)
+        got_tree = parse(got)
+
+        #print "Want Tree: %s" % (lxml.etree.tostring(desired_tree))
+        #print "Got Tree: %s" % (lxml.etree.tostring(got_tree))
+
+        t1 = desired_tree.iter()
+        t2 = got_tree.iter()
+
+        while True:
+            elem1 = self.get_next_elem(t1)
+            elem2 = self.get_next_elem(t2)
+
+            if elem1 is None and elem2 is None:
+                return True
+            elif (elem1 is None) != (elem2 is None):
+                raise CompareException("Different tree structures.",
+                        desired_tree, elem1, got_tree, elem2)
+
+            elem1_type = self.get_elem_type(elem1)
+            elem2_type = self.get_elem_type(elem2)
+
+            if elem1_type != elem2_type:
+                raise CompareException("Different element types: %s != %s" % \
+                        (elem1_type, elem2_type),
+                        desired_tree, elem1, got_tree, elem2)
+
+            elif elem1_type == "element":
+                self.compare_elements(elem1, elem2, desired_tree, got_tree)
+                    
+
+        raise Exception("shouldn't be hit")
+
 # -----------------------------------------------------------------------------
 
 class TestBase(object):
@@ -265,94 +490,16 @@ class TestBase(object):
         """
         LXML html cleaner with settings set
         """
-        cleaner = lxml.html.clean.Cleaner()
-        cleaner.frames = False
-        cleaner.forms = False
-        cleaner.page_structure = False
-        #cleaner.style = False
+        cleaner = lxml.html.clean.Cleaner(
+            frames = False,
+            forms = False,
+            page_structure = False,
+        )
         return cleaner
 
-
-    def compare_html(self, want, got,
-            should_augment_defaults_for_ie=True,
-            should_strip_localhost_hrefs_for_ie=True,
-            should_remove_title_for_ie=True,
-            strip_style_attributes=True,
-            ignore_hrefs=True,
-            clean=False):
-        """
-        Yep, compare two target documents together
-
-        :param want:    The "template" HTML we're matching against (either a string or a etree document)
-        :param got:     The output HTML we got from our test (string or etree)
-        :param should_augment_defaults_for_ie:
-                        Force default attributes onto various nodes to
-                        compensate for IE removing attributes at whim
-
-                        e.g. All <input> elements without a "type" attribute
-                        will get a type="text" attribute forcibly added before
-                        the compare
-
-        :param should_strip_localhost_hrefs_for_ie:
-                        IE hrefs tend to prefix with the hostname. This messes
-                        with our comparison, so strip the hostname prefixs. e.g.
-
-                        <a href="http://127.0.0.1:49602/test_dom_sync_content2.html">
-                        will be fixed to
-                        <a href="test_dom_sync_content2.html">
-
-        :param should_remove_title_for_ie:
-                        IE tends to remove any text inside the <title> element,
-                        causing mismatches. We'll just remove it from our
-                        compare documents.
-
-        :param strip_style_attributes:
-                        IE's style attributes are unworkable for comparison
-
-        :param ignore_hrefs:
-                        Strip HREFs out
-
-        :param clean:   Try to perform some extra cleaning using the lxml html
-                        Cleaner class to make the comparison less brittle.
-        """
-        want_doc = lxml.html.fromstring(want) if isinstance(want, basestring) else want
-        got_doc = lxml.html.fromstring(got) if isinstance(got, basestring) else got
-
-        compare = LHTMLOutputChecker()
-
-        if should_augment_defaults_for_ie:
-            augment_tree_defaults_for_ie(want_doc)
-            augment_tree_defaults_for_ie(got_doc)
-
-        if ignore_hrefs:
-            strip_hrefs(want_doc)
-            strip_hrefs(got_doc)
-        elif should_strip_localhost_hrefs_for_ie:
-            strip_localhost_hrefs_for_ie(want_doc)
-            strip_localhost_hrefs_for_ie(got_doc)
-
-        if should_remove_title_for_ie:
-            remove_title_for_ie(want_doc)
-            remove_title_for_ie(got_doc)
-
-        if strip_style_attributes:
-            lxml.etree.strip_attributes(want_doc, "style")
-            lxml.etree.strip_attributes(got_doc, "style")
-
-
-        if clean:
-            cleaner = self.get_html_cleaner()
-            cleaner(want_doc)
-            cleaner(got_doc)
-
-        result = compare.compare_docs(want_doc, got_doc)
-
-        if not result:
-            got_doc_string = lxml.html.tostring(got_doc)
-            want_doc_string = lxml.html.tostring(want_doc)
-            print compare.output_difference(Example("", want_doc_string),
-                    got_doc_string, 0)
-        return result
+    def compare_html(self, desired, got, **options):
+        comparator = HTMLComparator(**options)
+        return comparator.run(desired, got)
 
 class JavascriptFailed(Exception):
     pass
@@ -367,7 +514,7 @@ class TestBrowserBase(TestBase):
     # Class level testing setup/teardown
     #
     # Note: If overriding teardownClass/setupClass check if you need to call
-    # the corresponding superclass method 
+    # the corresponding superclass method
 
     @classmethod
     def teardownClass(cls):
@@ -439,7 +586,7 @@ class TestBrowserBase(TestBase):
             return value
 
     def get_html_url(self, f):
-        # Assumes file is in html/ directory 
+        # Assumes file is in html/ directory
         hostname, port = get_webserver_address()
         url = "http://%s:%s/%s" % (hostname, port, f)
         return url

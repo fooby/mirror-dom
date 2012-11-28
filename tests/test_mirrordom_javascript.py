@@ -6,11 +6,20 @@ import json
 import os
 import re
 import time
+import sys
 
+import lxml
 import nose.plugins.skip
 from selenium.common.exceptions import NoSuchElementException
 
 import util
+
+try:
+    import mirrordom.server
+except ImportError:
+    sys.path.append(util.get_mirrordom_path())
+    import mirrordom.server
+from mirrordom.parser import parse_html
 
 def setupModule():
     util.start_webserver()
@@ -64,6 +73,9 @@ class TestFirefox(util.TestBrowserBase):
             viewer.apply_document(de, arguments[0]);
         """, html)
 
+    #def compare_html(self, ):
+    #    util.TestBrowserBase.compare_html(desired_html, got_html, **compare_kwargs)
+
     # --------------------------------------------------------------------------
     # Tests
     # --------------------------------------------------------------------------
@@ -84,6 +96,9 @@ class TestFirefox(util.TestBrowserBase):
 
         # Internet explorer values contain windows line endings
         browser_html = browser_html.replace('\r\n', '\n')
+        print "Browser HTML: %s" % (browser_html)
+        browser_tree = parse_html(browser_html)
+        browser_xml = lxml.etree.tostring(browser_tree)
 
         # Compare it to the actual HTML file
         html_path = util.get_html_path(self.HTML_CONTENT_FILE)
@@ -91,12 +106,13 @@ class TestFirefox(util.TestBrowserBase):
 
         # Semi hack: We expect all browsers to insert tbody, so we'll manually
         # insert tbodies into our "expected" html too
-        import lxml.html
-        actual_tree = lxml.html.fromstring(actual_html)
-        util.force_insert_tbody(actual_tree)
+        #import lxml.html
+        #actual_tree = lxml.html.fromstring(actual_html)
+        #util.force_insert_tbody(actual_tree)
 
         #browser_tree = lxml.html.fromstring(browser_html)
-        assert self.compare_html(actual_tree, browser_html)
+
+        assert self.compare_html(actual_html, browser_xml, ignore_script_content=True)
 
     # Note that I've deliberately omitted <tbody> from the table element, as I
     # want to see what sort of complications ensue
@@ -148,8 +164,14 @@ class TestFirefox(util.TestBrowserBase):
             viewer.apply_document(de, arguments[0]);
         """, desired_html)
 
+
+        # Parse the viewer html. We need to parse it with our own custom HTML
+        # parser and then dump it back out as well-formed XML, to allow the
+        # comparison to proceed.
         viewer_html = self.get_viewer_html()
-        assert self.compare_html(desired_html, viewer_html, clean=True)
+        viewer_tree = parse_html(viewer_html)
+        viewer_xml = lxml.etree.tostring(viewer_tree)
+        assert self.compare_html(desired_html, viewer_xml, strip_localhost_hrefs_for_ie=True)
 
     def test_get_diff_add_node(self):
         """ Test 3: Diff of adding a node """
@@ -176,10 +198,13 @@ class TestFirefox(util.TestBrowserBase):
         tail_text = diffs[0][4]
         props = diffs[0][5]
 
+        print "Expected: %s" % (EXPECTED_NODE_HTML)
+        print "Html: %s" % (html)
+
         # Warning: innerHTML works different between different browsers
         # (i.e. IE will mangle innerHTML with dynamic property updates we can't
         # do a direct string comparison)
-        assert self.compare_html(EXPECTED_NODE_HTML, html, clean=True)
+        assert self.compare_html(EXPECTED_NODE_HTML, html, ignore_attrs=['style'])
 
         # test_3_modify_broadcaster_document_with_add_node adds
         # background-color style which should reflect in the node properties
@@ -485,7 +510,7 @@ class TestFirefox(util.TestBrowserBase):
         desired_html = self.TEST_APPLY_DOCUMENT_WITH_STYLE_ELEMENT
         self.apply_viewer_html(desired_html)
         viewer_html = self.get_viewer_html()
-        assert self.compare_html(desired_html, viewer_html, clean=True)
+        assert self.compare_html(desired_html, viewer_html)
 
 class TestIE(TestFirefox):
 

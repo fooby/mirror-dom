@@ -2,18 +2,8 @@ import time
 import logging
 import pprint
 import uuid
-import lxml
-import lxml.etree
-import lxml.html
-import lxml.html.clean
 
-try:
-    import html5lib
-    import lxml.html.html5parser
-    HTML5LIB_INSTALLED = True
-except ImportError:
-    HTML5LIB_INSTALLED = False
-
+from . import sanitise
 
 logger = logging.getLogger("mirrordom")
 
@@ -127,162 +117,6 @@ class Changelog(object):
                 "last_change_id": self.last_change_id,
             }
 
-def _get_html_cleaner():
-    cleaner = lxml.html.clean.Cleaner(
-        frames = False,
-        links = False,
-        forms = False,
-        style = False,
-        page_structure = False,
-        scripts = True,
-        embedded = False,
-        safe_attrs_only = False,
-
-        # Setting title elements have some issues in IE
-        kill_tags = ['title'],
-
-        # Hmm...we want to keep SVG and VML tags
-        remove_unknown_tags = False,
-
-        # If True, the cleaner will wipe out <link> elements. We do want to clean
-        # javascript but we can't use the cleaner's handling, so we'll have to do
-        # our own javascript cleaning later on.
-        javascript = False,
-    )
-
-    cleaner.remove_unknown_tags = False
-
-    return cleaner
-
-def sanitise_diffs(diffs):
-    # For now, we'll just sanitise in place
-    for d in diffs:
-        diff_type = d[0]
-        if diff_type == "node":
-            sanitise_node_diff(d)
-    return diffs
-
-def sanitise_node_diff(diff):
-    """
-    Sanitise the node HTML (note: diffs now contain the node's outerHTML, not
-    innerHTML as in earlier versions).
-    """
-    # [1] Path [2] type [3] outer html [5] prop tree
-
-    # Temporary workaround to prevent SVG elements causing errors (they
-    # don't have innerHTML). TODO: FIX
-    if diff[3] is None:
-        return
-    diff[3] = sanitise_html_fragment(diff[3])
-
-def sanitise_html_fragment(html):
-    doc = sanitise_document(html, return_etree=True, use_html5lib=False, is_fragment=True)
-    return lxml.etree.tostring(doc)
-
-def force_insert_tbody(html_tree):
-    """
-    We want to force insert <tbody> elements between tables and trs to simulate
-    the automatic <tbody> insertion that most browsers do internally in their
-    DOM structure. It's probably not safe to assume that the innerHTML values
-    will always include the <tbody> insertion, so we'll just do it ourselves
-    here too.
-    """
-    tables = html_tree.iter('table')
-    for table in tables:
-        tbody = None
-        children = list(table)
-        for c in children:
-            if not isinstance(c.tag, basestring):
-                continue
-            elif c.tag.lower() == "colgroup":
-                continue
-            elif c.tag.lower() in ("tbody", "tfoot", "thead"):
-                tbody = None
-            else:
-                if tbody is None:
-                    tbody = lxml.html.Element('tbody')
-                    c.addprevious(tbody)
-                tbody.append(c)
-    return html_tree
-
-def sanitise_document(html, return_etree=False, use_html5lib=False, is_fragment=False):
-    """
-    Strip out nasties such as <meta>, <script> and other useless bits of
-    information.
-
-    NOTE: The sanitising process needs to work in agreement with the javascript function
-    MirrorDom.Util.should_ignore_node
-
-    :param return_etree:        If True, return an etree object (instead of a string)
-
-    :param use_html5lib:        Use the html5lib parser, which is highly
-                                consistent and corrective of dodgy structure,
-                                but wreaks havoc when parsing fragments of HTML
-                                (i.e. it basically expects to parse an entire
-                                document)
-
-    :param is_fragment:         Whether we're doing a fragment of the HTML document.
-                                This is important, because lxml -> libxml2 does
-                                some really bad automatic wrapping of elements
-                                with <html><body>...</body></html> which we can't disable
-                                as we have no way of sending
-                                HTML_PARSE_NOIMPLIED through to the libxml2
-                                parser. So we'll manually remove the wrapping
-                                elements afterwards.
-    """
-    global HTML5LIB_INSTALLED
-    if use_html5lib and HTML5LIB_INSTALLED:
-        # HTML5Lib is a very good HTML soup parser, but sometimes it interferes
-        # with the DOM structure a bit too much.
-        parser = lxml.html.html5parser.HTMLParser(namespaceHTMLElements=False)
-        html_tree = lxml.html.html5parser.fromstring(html, parser=parser)
-
-        # Unfortunately, html5parser returns lxml.etree elements, but the
-        # cleaner only works with lxml.html elements. So the temporary quick
-        # fix is to dump the parsed document back to an XML string and
-        # re-parse.
-        temp = lxml.html.tostring(html_tree)
-        final_html_tree = lxml.html.fromstring(temp)
-    else:
-        if is_fragment:
-            try:
-                final_html_tree = lxml.html.fragment_fromstring(html)
-            except lxml.etree.ParserError:
-                final_html_tree = lxml.html.fromstring(html)
-        else:
-            final_html_tree = lxml.html.fromstring(html)
-
-        force_insert_tbody(final_html_tree)
-
-    cleaner = _get_html_cleaner()
-    cleaner(final_html_tree)
-
-    # Find iframes and strip src
-    for iframe in final_html_tree.iter('iframe'):
-        try:
-            iframe.attrib.pop("src")
-        except KeyError:
-            pass
-
-    # Find anchors and strip hrefs        
-    for anchor in final_html_tree.iter('a'):
-        if "href" in anchor.attrib:
-            anchor.attrib["href"] = "#"
-
-    # Strip javascript (copied from lxml.html.clean.Cleaner code, but that does
-    # more than we want)
-    # safe_attrs handles events attributes itself
-    for el in final_html_tree.iter():
-        attrib = el.attrib
-        for aname in attrib.keys():
-            if aname.startswith('on'):
-                del attrib[aname]
-
-    if return_etree:
-        return final_html_tree
-    else:
-        return lxml.etree.tostring(final_html_tree)
-
 def create_storage():
     """
     Create a state storage object. Right now this is just a dictionary but
@@ -329,7 +163,7 @@ def handle_send_new_instance(storage, frame_id, html, props, url=None, iframes=N
     :@param url:         URL of the new page
     :@param iframes:     Paths to child iframes
     """
-    html = sanitise_document(html)
+    html = sanitise.sanitise_html(html)
     storage.init_html(frame_id, html, props, url=url)
     storage.remove_frame_children(frame_id)
     #storage.add_frames(iframes)
@@ -343,7 +177,7 @@ def handle_send_new_page(storage, frame_id, html, props, url, iframes):
     :param url:         URL of the new page
     :param iframes:     Paths to child iframes
     """
-    html = sanitise_document(html)
+    html = sanitise.sanitise_html(html)
     storage.init_html(frame_id, html, props, url=url)
     storage.remove_frame_children(frame_id)
 
@@ -355,7 +189,7 @@ def handle_send_diffs(storage, frame_id, diffs):
     returns the next last_change_id
     """
     logger.debug("add_diff: %s, %s", frame_id, pprint.pformat(diffs))
-    diffs = sanitise_diffs(diffs)
+    diffs = sanitise.sanitise_diffs(diffs)
     try:
         storage.add_diff(frame_id, diffs)
     except KeyError:

@@ -371,13 +371,12 @@ function(xml_node, dest, use_innerhtml) {
             inner_html.push(new_xml);
         }
         dest.html(inner_html.join(''));
-    }
-    else {
+    } else {
         for (var i = 0; i < children.length; i++) {
             var new_node = children[i];
             var dom_node = MirrorDom.copy_xml_node_to_dom(
                     dest[0].ownerDocument, new_node);
-            // Comment nodes don't get copied
+            // PI nodes don't get copied
             if (dom_node != null) {
                 dest[0].appendChild(dom_node);
             }

@@ -9,6 +9,7 @@ import os
 import json
 import time
 import pprint
+import lxml
 
 import util
 import test_javascript
@@ -21,6 +22,8 @@ try:
 except ImportError:
     sys.path.append(util.get_mirrordom_path())
     import mirrordom.server
+
+from mirrordom.parser import parse_html
 
 def setupModule():
     util.start_webserver()
@@ -41,20 +44,40 @@ class TestFirefox(util.TestBrowserBase):
     # --------------------------------------------------------------------------
     # Helpers
     # --------------------------------------------------------------------------
-    def compare_inner_iframes(self, iframe_name):
+    def html_to_xml(self, html):
+        tree = parse_html(html)
+        return lxml.etree.tostring(tree)
+
+    def compare_inner_iframes(self, iframe_name, **compare_args):
         # Grab the broadcaster's iframes
         self.webdriver.switch_to_default_content()
         self.webdriver.switch_to_frame('broadcaster_iframe')
         self.webdriver.switch_to_frame(iframe_name)
-        source_iframe_html = self.webdriver.execute_script("return window.document.documentElement.innerHTML");
+        source_iframe_html = self.webdriver.execute_script("""return (
+            "<html>" + window.document.documentElement.innerHTML + "</html>");
+        """);
+        source_iframe_html = source_iframe_html.replace('\r\n', '\n')
+        source_iframe_xml = self.html_to_xml(source_iframe_html)
 
         # Grab the viewer's iframes
         self.webdriver.switch_to_default_content()
         self.webdriver.switch_to_frame('viewer_iframe')
         self.webdriver.switch_to_frame(iframe_name)
-        dest_iframe_html = self.webdriver.execute_script("return window.document.documentElement.innerHTML");
+        dest_iframe_html = self.webdriver.execute_script("""return (
+            "<html>" + window.document.documentElement.innerHTML + "</html>");
+        """);
+        dest_iframe_html = dest_iframe_html.replace('\r\n', '\n')
+        dest_iframe_xml = self.html_to_xml(dest_iframe_html)
 
-        return self.compare_html(source_iframe_html, dest_iframe_html, clean=True)
+        print "Source: %s" % (source_iframe_html)
+        print "Dest: %s" % (dest_iframe_html)
+        
+        # Options here need to reflect the sanitising process. Maybe I could
+        # just sanitise the source_iframe_html?
+        compare_args.setdefault("ignore_tags", ["meta", "script"])
+        compare_args.setdefault("ignore_comments", True)
+
+        return self.compare_html(source_iframe_xml, dest_iframe_xml, **compare_args)
 
     def init_broadcaster_state(self):
         self.execute_script("broadcaster.start_document();")

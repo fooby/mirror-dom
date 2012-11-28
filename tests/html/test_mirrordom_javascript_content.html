@@ -1,10 +1,11 @@
+<!-- Note: This has to be well-formed XML -->
 <html>
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
     <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8.23/jquery-ui.min.js"></script>
     <link rel="StyleSheet" type="text/css" href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/themes/south-street/jquery-ui.css"/>
-    <script type="text/javascript">
+    <script type="text/javascript">//<![CDATA[
         var text = ["Pig", "Dog", "Cat", "Aardvark"];
         var colour = ["blue", "green", "red"];
 
@@ -64,7 +65,7 @@
             }
         }
 
-    </script>
+    //]]></script>
     <style type="text/css">
       table { border-collapse: collapse; }
       table,th,td { border: 1px solid black; }
@@ -77,18 +78,20 @@
       <!-- Here lies another comment -->
       Blaurgh
       <table id="thetable" style="border: 1px solid black;">
-        <tr>
-          <th>1</th>
-          <th>2</th>
-        </tr>
-        <tr>
-          <td>a</td>
-          <td>b</td>
-        </tr>
-        <tr>
-          <td>c</td>
-          <td>d</td>
-        </tr>
+        <tbody>
+          <tr>
+            <th>1</th>
+            <th>2</th>
+          </tr>
+          <tr>
+            <td>a</td>
+            <td>b</td>
+          </tr>
+          <tr>
+            <td>c</td>
+            <td>d</td>
+          </tr>
+        </tbody>  
       </table>
     </div>
 

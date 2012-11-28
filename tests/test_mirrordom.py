@@ -13,16 +13,20 @@ import os
 import json
 import time
 
+from selenium import webdriver
+import lxml
+
 import util
 import test_javascript
-
-from selenium import webdriver
 
 try:
     import mirrordom.server
 except ImportError:
     sys.path.append(util.get_mirrordom_path())
     import mirrordom.server
+
+from mirrordom.sanitise import sanitise_html, sanitise_diffs
+from mirrordom.parser import parse_html
 
 def setupModule():
     util.start_webserver()
@@ -32,258 +36,6 @@ def teardownModule():
 
 class XMLCompareException(Exception):
     pass
-
-class TestServer(util.TestBase):
-    UNSANITARY_HTML = """\
-<html>
-  <head>
-    <title>RemoveMe</title>
-    <!-- Random comment -->
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
-    <link rel="StyleSheet" type="text/css" href="/trunkdevel/css/slidemenu.css?v=073c3303" />
-    <style type="text/css">
-      table { border-collapse: collapse; }
-      table,th,td { border: 1px solid black; }
-    </style>
-  </head>
-  <body>
-    <h1>Hello world!</h1>
-    <div>
-      <input id="text_input" type="text" size="50" value="hello"></input>
-    </div>
-    <a href="test_dom_sync_content2.html">Page 2</a>
-    <iframe name="theiframe" id="theiframe" src="blah.html"> </iframe>
-    <script type="text/javascript">alert("helo");</script>
-  </body>
-</html>
-"""
-
-    SANITARY_HTML = """\
-<html>
-  <head>
-    <link rel="StyleSheet" type="text/css" href="/trunkdevel/css/slidemenu.css?v=073c3303"/>
-    <style type="text/css">
-      table { border-collapse: collapse; }
-      table,th,td { border: 1px solid black; }
-    </style>
-  </head>
-  <body>
-    <h1>Hello world!</h1>
-    <div>
-      <input id="text_input" type="text" size="50" value="hello"></input>
-    </div>
-    <a href="#">Page 2</a>
-    <iframe name="theiframe" id="theiframe"> </iframe>
-  </body>
-</html>
-"""
-    @classmethod
-    def _create_webdriver(cls):
-        return None
-
-    def test_sanitise_document(self):
-        """
-        Test 1: Strip tags from submitted HTML.
-
-        No browser required
-        """
-        from_html = self.UNSANITARY_HTML
-        to_html = self.SANITARY_HTML
-        #import rpdb2
-        #rpdb2.start_embedded_debugger("hello")
-        result_html = mirrordom.server.sanitise_document(from_html)
-        assert self.compare_html(to_html, result_html, clean=False)
-
-
-    UNSANITARY_HTML_FRAGMENT = """
-    <div>
-      <!-- Random comment -->
-      hello world
-      <div id="blah">
-        <iframe src="http://removeme"> </iframe>
-      </div>
-      hlerhre
-      <script type="text/javascript">nope</script>
-      bye world
-    </div>
-    """
-
-    SANITARY_HTML_FRAGMENT = """
-    <div>
-      hello world
-      <div id="blah">
-          <iframe> </iframe>
-      </div>
-      hlerhre
-      bye world
-    </div>
-    """
-    def test_sanitise_html_fragment(self):
-        """
-        Test 2: Strip tags from node html fragment (used for node diffs)
-        """
-        from_html = self.UNSANITARY_HTML_FRAGMENT
-        to_html = self.SANITARY_HTML_FRAGMENT
-        result_html = mirrordom.server.sanitise_html_fragment(from_html)
-        assert self.compare_html(to_html, result_html, clean=False)
-
-    UNSANITARY_HTML_FRAGMENT2 = """
-    <tbody>
-        <tr>
-            <th class="heloworld">Blah</th>
-            <th class="heloworld2">Blah2</th>
-        </tr>
-        <tr>
-            <td style="background-color: blue;">SDF</td>
-            <td style="color: green;">axg</td>
-        </tr>
-    </tbody>
-    """
-
-    SANITARY_HTML_FRAGMENT2 = """
-    <tbody>
-        <tr>
-            <th class="heloworld">Blah</th>
-            <th class="heloworld2">Blah2</th>
-        </tr>
-        <tr>
-            <td style="background-color: blue;">SDF</td>
-            <td style="color: green;">axg</td>
-        </tr>
-    </tbody>
-    """
-    def test_sanitise_html_fragment2(self):
-        """ Test 3: Strip tags from complex inner html """
-        from_html = self.UNSANITARY_HTML_FRAGMENT2
-        to_html = self.SANITARY_HTML_FRAGMENT2
-        result_html = mirrordom.server.sanitise_html_fragment(from_html)
-        # html5parser mangles the input too much, disable it
-        assert self.compare_html(to_html, result_html, clean=False)
-
-    UNSANITARY_HTML_FRAGMENT3 = """<td style="background-color: blue;">SDF</td>"""
-    SANITARY_HTML_FRAGMENT3 = """<td style="background-color: blue;">SDF</td>"""
-    def test_sanitise_html_fragment3(self):
-        """ Test 3: Strip tags from complex inner html """
-        from_html = self.UNSANITARY_HTML_FRAGMENT3
-        to_html = self.SANITARY_HTML_FRAGMENT3
-        result_html = mirrordom.server.sanitise_html_fragment(from_html)
-        # html5parser mangles the input too much, disable it
-        assert self.compare_html(to_html, result_html, clean=False)
-
-    UNSANITARY_HTML_FRAGMENT_TBODY = """
-    <table>
-        <colgroup span="1"></colgroup>
-        <!-- Random comment -->
-        <thead>
-          <tr><td>Header</td></tr>
-        </thead>
-        <tfoot>
-          <tr><td>Footer</td></tr>
-        </tfoot>
-        <tr><td>Blah1</td></tr>
-        <tbody>
-            <tr><td>Blah2</td></tr>
-        </tbody>
-        <tr><td>Blah3</td></tr>
-        <tbody>
-          <tr><td>Blah4</td></tr>
-          <tr><td>Blah5</td></tr>
-        </tbody>
-        <tr><td>Blah6</td></tr>
-        <tr><td>Blah7</td></tr>
-    </table>
-    """
-
-    SANITARY_HTML_FRAGMENT_TBODY = """
-    <table>
-        <colgroup span="1"></colgroup>
-        <thead>
-          <tr><td>Header</td></tr>
-        </thead>
-        <tfoot>
-          <tr><td>Footer</td></tr>
-        </tfoot>
-        <tbody>
-          <tr><td>Blah1</td></tr>
-        </tbody>
-        <tbody>
-          <tr><td>Blah2</td></tr>
-        </tbody>
-        <tbody>
-          <tr><td>Blah3</td></tr>
-        </tbody>
-        <tbody>
-          <tr><td>Blah4</td></tr>
-          <tr><td>Blah5</td></tr>
-        </tbody>
-        <tbody>
-          <tr><td>Blah6</td></tr>
-          <tr><td>Blah7</td></tr>
-        </tbody>
-    </table>
-    """
-
-    def test_sanitise_html_fragment_tbody(self):
-        """ Test 3: Strip tags from complex inner html """
-        from_html = self.UNSANITARY_HTML_FRAGMENT_TBODY
-        to_html = self.SANITARY_HTML_FRAGMENT_TBODY
-        result_html = mirrordom.server.sanitise_document(from_html)
-        # html5parser mangles the input too much, disable it
-        assert self.compare_html(to_html, result_html, clean=False)
-
-    UNSANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE = """
-    <html>
-      <body>
-        <table>
-          <form name="badform">
-            <tr><td>Blah2</td></tr>
-          </form>
-        </table>
-      </body>
-    </html>
-    """
-
-    SANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE = """
-    <html>
-      <body>
-        <table>
-          <tbody>
-          <form name="badform">
-            <tr><td>Blah2</td></tr>
-          </form>
-          </tbody>
-        </table>
-      </body>
-    </html>
-    """
-    def test_sanitise_html_fragment_bad_form_in_table(self):
-        from_html = self.UNSANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE
-        to_html = self.SANITARY_HTML_FRAGMENT_BAD_FORM_IN_TABLE
-        result_html = mirrordom.server.sanitise_document(from_html)
-        # html5parser mangles the input too much, disable it
-        assert self.compare_html(to_html, result_html, clean=False)
-
-    UNSANITARY_HTML_FRAGMENT_LINK = """
-        <div>
-            <a href="www.google.com.au">Google</a>
-            <a href="/blah">Blah</a>
-            <a href="#" onclick="do_something_evil();">Evil</a>
-        </div>"""
-
-    SANITARY_HTML_FRAGMENT_LINK = """
-        <div>
-            <a href="#">Google</a>
-            <a href="#">Blah</a>
-            <a href="#">Evil</a>
-        </div>"""
-
-    def test_sanitise_links(self):
-        from_html = self.UNSANITARY_HTML_FRAGMENT_LINK
-        to_html = self.SANITARY_HTML_FRAGMENT_LINK
-        result_html = mirrordom.server.sanitise_document(from_html)
-        assert self.compare_html(to_html, result_html, ignore_hrefs=False, clean=False)
-
 
 class TestFirefox(util.TestBrowserBase):
     HTML_FILE = "test_mirrordom.html"
@@ -295,11 +47,35 @@ class TestFirefox(util.TestBrowserBase):
     # --------------------------------------------------------------------------
     # Helpers
     # --------------------------------------------------------------------------
-    def compare_frames(self):
+    def html_to_xml(self, html):
+        tree = parse_html(html)
+        return lxml.etree.tostring(tree)
+
+    def compare_frames(self, sanitise_broadcaster=True, **compare_kwargs):
         broadcaster_html = self.webdriver.execute_script(
                 "return get_broadcaster_html()")
+        broadcaster_html = broadcaster_html.replace('\r\n', '\n')
         viewer_html = self.webdriver.execute_script("return get_viewer_html()")
-        return self.compare_html(broadcaster_html, viewer_html, clean=True)
+        viewer_html = viewer_html.replace('\r\n', '\n')
+
+        if sanitise_broadcaster:
+            broadcaster_html = sanitise_html(broadcaster_html)
+        else:
+            broadcaster_html = self.html_to_xml(broadcaster_html)
+
+        print ""
+        print "Broadcaster HTML"            
+        print "================"
+        print broadcaster_html
+
+        print ""
+        print "Viewer HTML"            
+        print "================"
+        print viewer_html
+
+        viewer_html = self.html_to_xml(viewer_html)
+        return self.compare_html(broadcaster_html, viewer_html,
+                **compare_kwargs)
 
     def apply_viewer_html(self, html):
         self.execute_script("""
@@ -331,7 +107,7 @@ class TestFirefox(util.TestBrowserBase):
             var data = broadcaster.start_document();
             return data['html'];
         """)
-        result_html = mirrordom.server.sanitise_document(init_html)
+        result_html = sanitise_html(init_html)
         self.apply_viewer_html(result_html)
         assert self.compare_frames()
 
@@ -350,7 +126,7 @@ class TestFirefox(util.TestBrowserBase):
         diff = self.get_broadcaster_diff()
         print "==DIFF=="
         print json.dumps(diff)
-        diff = mirrordom.server.sanitise_diffs(diff)
+        diff = sanitise_diffs(diff)
         self.apply_viewer_diff(diff)
         assert self.compare_frames()
 
@@ -389,7 +165,7 @@ class TestFirefox(util.TestBrowserBase):
         # border rules for each side, FF retains the single border rule)
         assert util.diff_contains_changed_property_value(diff, "purple")
 
-        diff = mirrordom.server.sanitise_diffs(diff)
+        diff = sanitise_diffs(diff)
 
         # We can reuse test 2's diff apply thing
         self.apply_viewer_diff(diff)
@@ -459,7 +235,7 @@ class TestFirefox(util.TestBrowserBase):
             broadcaster_iframe.contentWindow.insert_div();
         """)
         diff = self.get_broadcaster_diff()
-        diff = mirrordom.server.sanitise_diffs(diff)
+        diff = sanitise_diffs(diff)
         self.apply_viewer_diff(diff)
         assert self.compare_frames()
 
@@ -475,9 +251,12 @@ class TestFirefox(util.TestBrowserBase):
             broadcaster_iframe.contentWindow.insert_table();
         """)
         diff = self.get_broadcaster_diff()
-        diff = mirrordom.server.sanitise_diffs(diff)
+        for d in diff:
+            if d[0] == "node":
+                print "Diff: %s" % (d[3])
+        diff = sanitise_diffs(diff)
         self.apply_viewer_diff(diff)
-        assert self.compare_frames()
+        assert self.compare_frames(ignore_ie_default_attributes=True)
 
 class TestIE(TestFirefox):
     @classmethod
