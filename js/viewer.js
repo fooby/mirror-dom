@@ -266,7 +266,6 @@ function(changesets, resume_pos) {
             jQuery(iframe).load(callback);
             return;
         } else if (iframe_doc.readyState == 'loading') {
-            debugger;
             // Scenario 1: Newly created iframe
             this.log('Changeset ' + i + ': Waiting for iframe to finish ' +
                     'loading: ' + i + ' on frame ' + frame_path_str);
@@ -397,9 +396,6 @@ MirrorDom.Viewer.prototype.xml_to_string = function(xml_node) {
  */
 MirrorDom.Viewer.prototype.copy_to_node =
 function(xml_node, dest, use_innerhtml) {
-    if (xml_node[0] == undefined) {
-        debugger;
-    }
     var children = xml_node[0].childNodes;
     if (use_innerhtml) {
         var inner_html = [''];
