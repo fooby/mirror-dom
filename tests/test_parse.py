@@ -45,7 +45,7 @@ class TestParseDirect(util.TestBase):
         desired = desired.strip()
         parsed_tree = parse_html(raw)
         parsed_html = lxml.etree.tostring(parsed_tree)
-        return self.compare_html(parsed_html, desired, **compare_args)
+        return self.compare_html(desired, parsed_html, **compare_args)
 
     # -----------------------------------------------------------------------------
     # Tests
@@ -98,6 +98,42 @@ class TestParseDirect(util.TestBase):
         ]]></script></body></html>"""
         assert self.parse_and_compare(raw, well_formed)
 
+    def test_svg_case_sensitivity(self):
+        """
+        Test svg element case preservation.
+        Well...we're at a crossroads now. SVG needs to retain the exact casing.
+        The linearGradient thing here is the element we're watching out for.
+        """
+        svg = """\
+        <DIV>
+            <svg viewBox = "0 0 1100 400" version = "1.1">
+                <defs>
+                    <rect id = "r1" width = "350" height = "350" stroke = "black" stroke-width = "1"/>
+                    <linearGradient id = "g1" x1 = "0%" y1 = "0%" x2 = "100%" y2 = "100%">
+                        <stop stop-color = "black" offset = "0%"/>
+                        <stop stop-color = "teal" offset = "50%"/>
+                        <stop stop-color = "white" offset = "100%"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+        </DIV>"""
+
+        desired = """\
+        <div>
+            <svg viewBox = "0 0 1100 400" version = "1.1">
+                <defs>
+                    <rect id = "r1" width = "350" height = "350" stroke = "black" stroke-width = "1"/>
+                    <linearGradient id = "g1" x1 = "0%" y1 = "0%" x2 = "100%" y2 = "100%">
+                        <stop stop-color = "black" offset = "0%"/>
+                        <stop stop-color = "teal" offset = "50%"/>
+                        <stop stop-color = "white" offset = "100%"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+        </div>"""
+        assert self.parse_and_compare(svg, desired, ignore_tag_case=False,
+                ignore_attr_case=False)
+
 class TestFirefox(util.TestBrowserBase):
     """
     Test applying HTML fragments to the browser, reading them back, sanitising
@@ -126,7 +162,7 @@ class TestFirefox(util.TestBrowserBase):
     def apply_and_compare(self, html, desired_html=None,
             **compare_kwargs):
         browser_html = self.to_browser_html(html)
-        print "Browser html: %s" % (browser_html)
+        #print "Browser html: %s" % (browser_html)
         desired_html = html if desired_html is None else desired_html
         parsed_tree = parse_html(browser_html)
         parsed_html = lxml.etree.tostring(parsed_tree)
@@ -150,11 +186,11 @@ class TestFirefox(util.TestBrowserBase):
     def test_dodgy_self_closing_tag(self):
         """
         Test browser automatically fixing up dodgy self closing input tag.
-        
+
         Note: IE doesn't actually fix it up, it leaves it as:
 
         <SPAN><INPUT>I shouldn't be here</INPUT>hello</SPAN>
-        
+
         But our HTML parser finishes the job of fixing it. Go our HTML parser!
         """
         self.init_webdriver()
@@ -202,13 +238,13 @@ class TestFirefox(util.TestBrowserBase):
         html = """<span>oh,<!-- hello world--><br/></span>"""
         assert self.apply_and_compare(html)
 
-    def test_bad_attribute(self):        
+    def test_bad_attribute(self):
         self.init_webdriver()
         html = """<div><span class="world"">World</span>Blah<a href="hello"" target="_top">Hello</a></div>"""
         desired_html = """<div><span class="world">World</span>Blah<a href="hello" target="_top">Hello</a></div>"""
         assert self.apply_and_compare(html, desired_html)
 
-    def test_para_autoclose(self):        
+    def test_para_autoclose(self):
         self.init_webdriver()
         html = """<div><p>hello<div>world</div></div>"""
         desired_html = """<div><p>hello</p><div>world</div></div>"""

@@ -13,16 +13,7 @@ import lxml.html.clean
 
 from . import parser
 
-logger = logging.getLogger("mirrordom")
-
-# List of void tags obtained from HTML5 specs. These are tags for which there
-# may not be a closing tag.
-VOID_TAGS = set(['area', 'base', 'br', 'col', 'command', 'embed', 'hr', 'img',
-                'input', 'keygen', 'link', 'meta', 'param', 'source', 'track',
-                'wbr'])
-
-VOID_TAGS_RE = re.compile("<(%s).*?>" % ('|'.join(VOID_TAGS)), re.IGNORECASE)
-TAG_END_RE = re.compile(".*?</\s*(\w+)\s*>")
+logger = logging.getLogger("mirrordom.sanitise")
 
 def _get_html_cleaner():
     cleaner = lxml.html.clean.Cleaner(
@@ -55,9 +46,16 @@ def sanitise_diffs(diffs):
     # For now, we'll just sanitise in place
     for d in diffs:
         diff_type = d[0]
+        diff_doctype = d[1]
+
+        # For SVG XML fragments, we need to retain the element and attribute
+        # casing. For HTML, we need to discard casing (everything goes to
+        # lowercase)
+        retain_case = (diff_doctype == "svg")
         if diff_type == "node":
             # [0] Type [1] Path [2] type [3] outer html ...
-            d[3] = sanitise_html(d[3], is_fragment=True)
+            d[3] = sanitise_html(d[3], is_fragment=True,
+                    retain_case=retain_case)
     return diffs
 
 def force_insert_tbody(html_tree):
@@ -86,7 +84,8 @@ def force_insert_tbody(html_tree):
                 tbody.append(c)
     return html_tree
 
-def sanitise_html(html, return_etree=False, is_fragment=False):
+def sanitise_html(html, return_etree=False, is_fragment=False,
+        retain_case=False):
     """
     Strip out nasties such as <meta>, <script> and other useless bits of
     information.
@@ -100,64 +99,16 @@ def sanitise_html(html, return_etree=False, is_fragment=False):
                                 The current HTML parsing using a subclassed
                                 python HTMLParser doesn't care whether it's a
                                 fragment or not, but other alternative HTML parsers do.
+
+    :param retain_case:         Retain element and attr casing. This can be bad for HTML,
+                                but is needed for SVG.
     """
-    #tree = parse_html(html, is_fragment=is_fragment)
-    tree = parser.parse_html(html)
+    tree = parser.parse_html(html, retain_case=retain_case)
     sanitise_tree(tree)
     if return_etree:
         return tree
     else:
         return lxml.etree.tostring(tree)
-
-#def correct_html(html, fix_void_tags=True):
-#    result = StringIO()
-#    pos = 0
-#    while True:
-#        m = VOID_TAGS_RE.search(html, pos)
-#        if m is not None:
-#            # Establish if it's an "open" void tag
-#            full_tag = m.group()
-#            tagname = m.group(1)
-#            need_to_fix = True
-#            end_pos = m.end()
-#            if full_tag[-2] == "/":
-#                need_to_fix = False
-#            else:
-#                end_match = TAG_END_RE.match(html, end_pos)
-#                if end_match is not None and end_match.group(1) == tagname:
-#                    need_to_fix = False
-#            if need_to_fix:
-#                # We'll manually close this tag
-#                result.write(html[pos:m.start()])
-#                full_tag = full_tag[:-1] + "/>"
-#                result.write(full_tag)
-#                new_pos = m.end()
-#            else:
-#                # Self closing tag
-#                new_pos = m.end()
-#                result.write(html[pos:new_pos])
-#            pos = new_pos
-#        else:
-#            # Write the rest of the string
-#            result.write(html[pos:])
-#            break
-#    return result.getvalue()
-#
-#def parse_html(html, is_fragment=False):
-#    """
-#    Parses HTML and return lxml.etree.ElementTree instance
-#    """
-#    #if is_fragment:
-#    #    try:
-#    #        return lxml.html.fragment_fromstring(html)
-#    #    except lxml.etree.ParserError:
-#    #        return lxml.html.fromstring(html)
-#    #else:
-#    #    return lxml.html.fromstring(html)
-#
-#
-#    html = correct_html(html, fix_void_tags=True)
-#    return lxml.etree.fromstring(html)
 
 def sanitise_tree(tree):
     """

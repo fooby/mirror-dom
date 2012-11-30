@@ -244,6 +244,8 @@ class HTMLComparator(object):
     ignore_tags = []
     ignore_attrs = ['webdriver'] # Selenium injects this attribute
     ignore_comments = False
+    ignore_tag_case = True
+    ignore_attr_case = True
     strip_localhost_hrefs_for_ie = True
 
     _IE_NODE_DEFAULTS = {
@@ -330,9 +332,12 @@ class HTMLComparator(object):
             for k in remove:
                 attrib.pop(k)
 
-
         a_attrib = dict(a.attrib)
         b_attrib = dict(b.attrib)
+
+        if self.ignore_attr_case:
+            a_attrib = {k.lower(): v for k,v in a_attrib.iteritems()}
+            b_attrib = {k.lower(): v for k,v in b_attrib.iteritems()}
 
         # Perform operations
         if self._ignore_attrs:
@@ -354,10 +359,10 @@ class HTMLComparator(object):
             if 'href' in b_attrib and b_attrib['href'] is not None:
                 b_attrib['href'] = self.strip_localhost_href(b_attrib['href'])
 
-        if self.ignore_jquery_attributes:                
+        if self.ignore_jquery_attributes:
             remove_jquery_attributes(a_attrib)
             remove_jquery_attributes(b_attrib)
-            
+
         a_set = set(a_attrib)
         b_set = set(b_attrib)
         added = b_set - a_set
@@ -367,8 +372,8 @@ class HTMLComparator(object):
             return False, "Added attributes: [%s] Missing attributes: [%s]" % \
                     (", ".join(added), ", ".join(removed))
 
-        assert a_set == b_set                    
-        
+        assert a_set == b_set
+
         changed = [(k, v, b_attrib[k]) for k, v in a_attrib.iteritems() \
                 if v != b_attrib[k]]
 
@@ -408,8 +413,11 @@ class HTMLComparator(object):
         except StopIteration:
             return None
 
-    def compare_elements(self, elem1, elem2, desired_tree, got_tree):        
-        if elem1.tag.lower() != elem2.tag.lower():
+    def compare_elements(self, elem1, elem2, desired_tree, got_tree):
+        elem1_tag = elem1.tag.lower() if self.ignore_tag_case else elem1.tag
+        elem2_tag = elem2.tag.lower() if self.ignore_tag_case else elem2.tag
+
+        if elem1_tag != elem2_tag:
             raise CompareException(
                     "Tags are not equal: %s != %s" % (elem1.tag, elem2.tag),
                     desired_tree, elem1, got_tree, elem2)
@@ -442,9 +450,9 @@ class HTMLComparator(object):
             raise Exception("Unknown element type: %r" % (elem))
 
 
-    def run(self, desired, got):    
+    def run(self, desired, got):
         """ Compare desired HTML to received HTML
-        
+
         :param desired:     Desired HTML string
         :param got:         Received HTML string
         """
@@ -479,7 +487,7 @@ class HTMLComparator(object):
 
             elif elem1_type == "element":
                 self.compare_elements(elem1, elem2, desired_tree, got_tree)
-                    
+
 
         raise Exception("shouldn't be hit")
 

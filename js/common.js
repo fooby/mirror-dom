@@ -6,10 +6,19 @@ var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
 /**
  * Convert array to object for fast hashmap lookup
+ *
+ * @param <variable length>     Either strings or list of strings       
  */
-MirrorDom.to_set = function(x) {
+MirrorDom.to_set = function() {
     var result = {};
-    for (var i = 0; i < x.length; i++) { result[x[i]] = null; }
+    for (var i = 0; i < arguments.length; i++) {
+        var x = arguments[i];
+        if (x instanceof Array) {
+            for (var j = 0; j < x.length; j++) { result[x[j]] = null; }
+        } else {
+            result[x] = null;
+        }
+    }
     return result;
 };
 
@@ -48,7 +57,7 @@ MirrorDom.determine_node_doc_type = function(node) {
 // Set of ALL properties in a given document type.
 MirrorDom.PROPERTY_NAMES = {
     'html': ['disabled', 'value', 'checked', 'style.cssText', 'className',
-             'colSpan'],
+             'colSpan', 'selectedIndex'],
     'svg': ['style.cssText'],
     'vml': ['style.cssText', 'runtimeStyle.cssText', 'path.v',
             'strokeColor.value', 'strokeweight']
@@ -56,8 +65,10 @@ MirrorDom.PROPERTY_NAMES = {
 
 // Restrict certain properties to certain tags. Must be in lower case
 MirrorDom.PROPERTY_RESTRICT = {
-    'html': { 'colSpan': MirrorDom.to_set(['td', 'th']) },
-    'vml': { 'path.v': MirrorDom.to_set(['shape']) }
+    'html': { 'colSpan': MirrorDom.to_set('td', 'th'),
+              'value': MirrorDom.to_set('input'),
+              'selectedIndex': MirrorDom.to_set('select') },
+    'vml': { 'path.v': MirrorDom.to_set('shape') }
 };
 
 // Cache of doc_type -> tag_name -< lookup
@@ -210,9 +221,9 @@ MirrorDom.insert_after = function(new_node, target) {
 
 
 // Ignore certain attributes when doing attribute comparison
-MirrorDom.IGNORE_ALL_ATTRIBS = MirrorDom.to_set(['style']);
+MirrorDom.IGNORE_ALL_ATTRIBS = MirrorDom.to_set('style');
 MirrorDom.IGNORE_ATTRIBS = {
-    'html': { 'src': MirrorDom.to_set(['iframe']) }
+    'html': { 'src': MirrorDom.to_set('iframe') }
 };
 
 /**
@@ -233,8 +244,8 @@ MirrorDom.should_ignore_attribute = function(node, attribute) {
 // ============================================================================
 // Tags
 // ============================================================================
-MirrorDom.IGNORE_NODES = MirrorDom.to_set(['META', 'SCRIPT', 'TITLE']);
-MirrorDom.ACCEPT_HTML_NODES = MirrorDom.to_set(['BODY', 'HEAD']);
+MirrorDom.IGNORE_NODES = MirrorDom.to_set('META', 'SCRIPT', 'TITLE');
+MirrorDom.ACCEPT_HTML_NODES = MirrorDom.to_set('BODY', 'HEAD');
 
 /**
  * Determines if the current DOM node is an interesting element.

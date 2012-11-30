@@ -4,13 +4,23 @@ import pprint
 import uuid
 
 from . import sanitise
+from . import parser
 
-logger = logging.getLogger("mirrordom")
+logger = logging.getLogger("mirrordom.server")
+
+# Exceptions
+class ChangelogNotFound(Exception):
+    def __init__(self, frame_id):
+        msg = "Frame id: %r" % (frame_id)
+        Exception.__init__(self, msg)
+
+# Constants
+ERROR_INVALID_HTML = "invalid_html"
 
 class Session(object):
     """
-    Track changelogs for each frame individually, but keep a common id counting
-    system for the diffs.
+    Track changelogs for each frame individually, but keep a universal id
+    counter for the diffs.
     """
 
     def __init__(self):
@@ -27,18 +37,41 @@ class Session(object):
         self.last_change_id += 1
         x = self.last_change_id
         return x
+    
+    def new_changelog(self, frame_id, *args, **kwargs):
+        """
+        Wrapper around Changelog object instantiation.
+
+        See Changelog.__init__ for arguments.
+        """
+        next_id = self.get_next_change_id()
+        c = Changelog(next_id, *args, **kwargs)
+        self.changelogs[frame_id] = c
+        return c
+
+    def fetch_changelog(self, frame_id):
+        try:
+            return self.changelogs[frame_id]
+        except KeyError:
+            raise ChangelogNotFound(frame_id)
 
     def init_html(self, frame_id, html, props, url=None):
+        c = self.new_changelog(frame_id, html, url)
         next_id = self.get_next_change_id()
-        c = Changelog(html, next_id, url)
         c.add_diff_set(next_id, props)
-        self.changelogs[frame_id] = c
 
     def add_diff(self, frame_id, diffs):
+        c = self.fetch_changelog(frame_id)
         next_id = self.get_next_change_id()
-        # Raises KeyError if frame_id not found
-        c = self.changelogs[frame_id]
         c.add_diff_set(next_id, diffs)
+
+    def set_bad_state(self, frame_id, state, msg):
+        try:
+            c = self.fetch_changelog(frame_id)
+        except ChangelogNotFound:
+            # Create a dummy changelog with a bad state
+            c = self.new_changelog(frame_id, init_html=None)
+        c.set_bad_state(state, msg)
 
     def update_frames(self, frame_paths):
         frame_paths = set(tuple(f) for f in frame_paths)
@@ -62,20 +95,28 @@ class Session(object):
                         f, frame_path)
                 del self.changelogs[f]
 
-
 class Changelog(object):
-    def __init__(self, init_html, first_change_id, url=None):
+    """
+    Changes for an individual frame.
+    """
+    def __init__(self, start_id, init_html, url=None):
         self.init_html = init_html
         self.diffs = []
-        self.first_change_id = first_change_id
+        self.first_change_id = start_id
         self.url = url
+
+        # will be a tuple of (ERROR_*, msg)
+        self.bad_state = None
+
+    def set_bad_state(self, state, msg):
+        self.bad_state = (state, msg)
 
     def add_diff_set(self, next_id, diff):
         """
         :param diff:    List of diffs
         """
         self.diffs.append((next_id, diff))
-        logger.debug("Adding %s diffs to change id %s", len(diff), next_id)
+        #logger.debug("Adding %s diffs to change id %s", len(diff), next_id)
 
     def __repr__(self):
         return pprint.pformat(vars(self))
@@ -88,7 +129,15 @@ class Changelog(object):
         """
         return a dict describing the changesets that
         have arrived since since_change_id (inclusive)
+
+        Update: If we're in a bad state (e.g. due to one of the incoming HTML
+        messages not being parsable) then send an error message.
         """
+        if self.bad_state is not None:
+            state, msg = self.bad_state
+            return { "last_change_id": self.last_change_id, "error": state,
+                    "error_msg": msg }
+
         if since_change_id > self.last_change_id:
             return { "last_change_id": self.last_change_id, }
 
@@ -124,8 +173,6 @@ def create_storage():
 
     This storage corresponds to one session only.
     """
-    #return {'changelogs': {},
-    #        'iframes':    []}
     return Session()
 
 
@@ -163,10 +210,14 @@ def handle_send_new_instance(storage, frame_id, html, props, url=None, iframes=N
     :@param url:         URL of the new page
     :@param iframes:     Paths to child iframes
     """
-    html = sanitise.sanitise_html(html)
-    storage.init_html(frame_id, html, props, url=url)
-    storage.remove_frame_children(frame_id)
-    #storage.add_frames(iframes)
+    try:
+        html = sanitise.sanitise_html(html)
+    except parser.HTMLParseError, e:
+        storage.set_bad_state(frame_id, ERROR_INVALID_HTML,
+            str(e))
+    else:
+        storage.init_html(frame_id, html, props, url=url)
+        storage.remove_frame_children(frame_id)
 
 def handle_send_new_page(storage, frame_id, html, props, url, iframes):
     """
@@ -177,9 +228,14 @@ def handle_send_new_page(storage, frame_id, html, props, url, iframes):
     :param url:         URL of the new page
     :param iframes:     Paths to child iframes
     """
-    html = sanitise.sanitise_html(html)
-    storage.init_html(frame_id, html, props, url=url)
-    storage.remove_frame_children(frame_id)
+    try:
+        html = sanitise.sanitise_html(html)
+    except parser.HTMLParseError, e:
+        storage.set_bad_state(frame_id, ERROR_INVALID_HTML,
+            str(e))
+    else:
+        storage.init_html(frame_id, html, props, url=url)
+        storage.remove_frame_children(frame_id)
 
 def handle_send_diffs(storage, frame_id, diffs):
     """
@@ -189,11 +245,16 @@ def handle_send_diffs(storage, frame_id, diffs):
     returns the next last_change_id
     """
     logger.debug("add_diff: %s, %s", frame_id, pprint.pformat(diffs))
-    diffs = sanitise.sanitise_diffs(diffs)
     try:
-        storage.add_diff(frame_id, diffs)
-    except KeyError:
-        logger.warn("Couldn't find frame %s" % (frame_id))
+        diffs = sanitise.sanitise_diffs(diffs)
+    except parser.HTMLParseError, e:
+        storage.set_bad_state(frame_id, ERROR_INVALID_HTML,
+            str(e))
+    else:
+        try:
+            storage.add_diff(frame_id, diffs)
+        except ChangelogNotFound:
+            logger.warn("Couldn't find frame %s" % (frame_id))
     return storage.last_change_id
 
 def handle_get_update(storage, change_id=None, init_html_required=False):
@@ -210,7 +271,7 @@ def handle_get_update(storage, change_id=None, init_html_required=False):
         has_init_html = False
         try:
             main_changeset = storage.changelogs[('m',)]
-        except KeyError:
+        except ChangelogNotFound:
             pass
         else:
             if main_changeset.first_change_id >= change_id:

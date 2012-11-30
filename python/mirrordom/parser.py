@@ -7,7 +7,8 @@ We'll try using lxml.html.Elements.
 
 import re
 import logging
-from HTMLParser import HTMLParser, HTMLParseError, tagfind
+from HTMLParser import HTMLParser, HTMLParseError
+from HTMLParser import tagfind, endendtag, endtagfind  # For HTMLParser hacks
 
 from lxml.html import Element
 import lxml.html
@@ -59,13 +60,6 @@ class OuterHTMLParser(HTMLParser):
         "option":   set(["option"]),
     }
 
-    #AUTOCLOSE_ON_CLOSE = {
-    #    "tbody":    set(["table"]),
-    #    "thead":    set(["table"]),
-    #    "tfoot":    set(["table"]),
-    #    "col":      set(["col"]),
-    #}
-
     AUTOCLOSE_ON_PARENT_CLOSE = set([
         "col", "tbody", "thead", "tfoot", "colgroup",
     ])
@@ -74,20 +68,26 @@ class OuterHTMLParser(HTMLParser):
     CDATA_CONTENT_ELEMENTS = ()
     CDATA_CONTENT_ELEMENTS_V2 = set(['script', 'style'])
 
-    def __init__(self):
+    def __init__(self, retain_case=False):
         self.stack = []
         self.root = None
+
+        # These two variables determine case sensitivity
+        self.retain_case = retain_case
+        self.in_svg = False
+
         HTMLParser.__init__(self)
 
     def find_autoclose_on_open(self, tag):
+        ltag = tag.lower()
         pos = len(self.stack) - 1
         while pos >= 0:
             elem = self.stack[pos]
             try:
-                autoclose_tags = self.AUTOCLOSE_ON_OPEN[elem.tag]
+                autoclose_tags = self.AUTOCLOSE_ON_OPEN[elem.tag.lower()]
             except KeyError:
                 break
-            if tag not in autoclose_tags:
+            if ltag not in autoclose_tags:
                 break
             elif pos == 0:
                 return 0
@@ -101,28 +101,6 @@ class OuterHTMLParser(HTMLParser):
             #logger.debug("Autoclosing: %s due to %s", self.stack[-1].tag, tag)
             self.close_tag(tag, force=True)
 
-    # None of our browsers rely on autoclosing...thankfully, they all
-    # insert close tags.
-    #
-    #def check_autoclose_on_close(self, tag):
-    #    if not self.stack:
-    #        return
-    #    pos = len(self.stack) - 1
-    #    while pos >= 0:
-    #        elem = self.stack[pos]
-    #        if elem.tag == tag:
-    #            # Success
-    #            break
-    #        elif elem.tag not in AUTOCLOSE_ON_PARENT_CLOSE:
-    #            # Failed at locating a tag
-    #            return 0
-    #        elif pos == 0:
-    #            # Failed at locating a tag
-    #            return 0
-    #        pos -=1
-    #    autoclose_count = len(self.stack) - pos
-    #    return autoclose_count
-
     def open_tag(self, tag, attrs):
         """
         Handle a new tag. Performs autoclose checks.
@@ -135,52 +113,30 @@ class OuterHTMLParser(HTMLParser):
             self.root = new
         else:
             if not self.stack:
-                raise HTMLParseError("Unexpected open tag: %s" % (tag))
+                self.error("Unexpected open tag: %s" % (tag))
             self.check_autoclose_on_open(tag)
             parent = self.stack[-1]
             parent.append(new)
         self.stack.append(new)
 
+        if tag == "svg":
+            self.in_svg = True
+
     def close_tag(self, tag, check_autoclose=False, force=False):
         """
-        Close a new tag. Performs autoclose checks.
+        Close a new tag.
 
-        :param check_autoclose:     Scans up through the stack to find out how
-                                    far to autoclose. UNUSED
         :param force:               Force close the topmost element on the stack
-                                    Not compatible with check_autoclose
         """
-        # Removing autoclose checking as our browsers automatically close
-        # elements.
-        #
-        #assert not (check_autoclose and force)
-        #if check_autoclose:
-        #    num_to_close = self.check_autoclose_on_close(tag)
-        #    if num_to_close == 0:
-        #        raise HTMLParseError("Unexpected close tag: %s. Expected: %s" \
-        #                % (tag, elem.tag))
-        #else:
-        #    if not self.stack:
-        #        raise HTMLParseError("Unexpected close tag at top of tree: %s" % \
-        #                tag)
-        #    elem = self.stack[-1]
-        #    if not force and elem.tag != tag:
-        #        raise HTMLParseError("Unexpected close tag: %s. Expected: %s" \
-        #                % (tag, elem.tag))
-        #    num_to_close = 1
-
-        #for i in range(num_to_close):
-        #    self.stack.pop()
-
         if not self.stack:
-            raise HTMLParseError("Unexpected close tag at top of tree: %s" % (tag))
+            self.error("Unexpected close tag at top of tree: %s" % (tag))
         elem = self.stack[-1]
         if not force and elem.tag != tag:
-            #import rpdb2
-            #rpdb2.start_embedded_debugger("hello")
-            raise HTMLParseError("Unexpected close tag: %s. Expected: %s" % \
-                    (tag, elem.tag))
+            self.error("Unexpected close tag: %s. Expected: %s" % (tag, elem.tag))
         self.stack.pop()
+
+        if elem.tag == "svg":
+            self.in_svg = False
 
     # -------------------------------------------------------------------------
     # HTMLParser methods
@@ -190,17 +146,19 @@ class OuterHTMLParser(HTMLParser):
         self.interesting = re.compile(r'<(/%s|\Z)' % (tag), re.IGNORECASE)
 
     def handle_starttag(self, tag, attrs):
+        ltag = tag.lower()
+
         self.open_tag(tag, attrs)
-        if tag in self.VOID_TAGS:
+        if ltag in self.VOID_TAGS:
             self.close_tag(tag)
 
-        if tag in self.CDATA_CONTENT_ELEMENTS_V2:
+        if ltag in self.CDATA_CONTENT_ELEMENTS_V2:
             self.set_specific_cdata_mode(tag)
 
     def handle_endtag(self, tag):
-        if tag in self.VOID_TAGS:
+        ltag = tag.lower()
+        if ltag in self.VOID_TAGS:
             return
-        #self.close_tag(tag, check_autoclose=True)
         self.close_tag(tag)
 
     def handle_startendtag(self, tag, attrs):
@@ -226,6 +184,8 @@ class OuterHTMLParser(HTMLParser):
     # HACK check_for_whole_start_tag to tolerate bad attributes (sigh)
     # -------------------------------------------------------------------------
 
+    def should_retain_case(self, tag=None):
+        return self.retain_case or self.in_svg or tag == "svg"
 
     LOCATESTARTTAGEND = re.compile(r"""
       <[a-zA-Z][-.a-zA-Z0-9:_]*          # tag name
@@ -287,8 +247,6 @@ class OuterHTMLParser(HTMLParser):
 
     # Internal -- handle starttag, return end or -1 if not terminated
     def parse_starttag(self, i):
-        #import rpdb2
-        #rpdb2.start_embedded_debugger("hello"
         self._HTMLParser__starttag_text = None
         endpos = self.check_for_whole_start_tag(i)
         if endpos < 0:
@@ -302,6 +260,12 @@ class OuterHTMLParser(HTMLParser):
         assert match, 'unexpected call to parse_starttag()'
         k = match.end()
         self.lasttag = tag = rawdata[i+1:k].lower()
+
+        # Case hack
+        if self.should_retain_case():
+            final_tag = rawdata[i+1:k]
+        else:
+            final_tag = tag
 
         while k < endpos:
             m = self.ATTRFIND.match(rawdata, k)                 # Hacked line
@@ -318,7 +282,11 @@ class OuterHTMLParser(HTMLParser):
                  attrvalue[:1] == '"' == attrvalue[-1:]:
                 attrvalue = attrvalue[1:-1]
                 attrvalue = self.unescape(attrvalue)
-            attrs.append((attrname.lower(), attrvalue))
+
+            if not self.should_retain_case(final_tag):          # Hacked
+                attrname = attrname.lower()                     # Hacked
+
+            attrs.append((attrname, attrvalue))                 # Hacked line
             k = m.end()
 
         end = rawdata[k:endpos].strip()
@@ -334,24 +302,44 @@ class OuterHTMLParser(HTMLParser):
                        % (rawdata[k:endpos][:20],))
         if end.endswith('/>'):
             # XHTML-style empty tag: <span attr="value" />
-            self.handle_startendtag(tag, attrs)
+            self.handle_startendtag(final_tag, attrs)
         else:
-            self.handle_starttag(tag, attrs)
+            self.handle_starttag(final_tag, attrs)
             if tag in self.CDATA_CONTENT_ELEMENTS:
                 self.set_cdata_mode()
         return endpos
 
-def parse_html(html, is_fragment=False):
+    # Internal -- parse endtag, return end or -1 if incomplete
+    def parse_endtag(self, i):
+        rawdata = self.rawdata
+        assert rawdata[i:i+2] == "</", "unexpected call to parse_endtag"
+        match = endendtag.search(rawdata, i+1) # >
+        if not match:
+            return -1
+        j = match.end()
+        match = endtagfind.match(rawdata, i) # </ + tag + >
+        if not match:
+            self.error("bad end tag: %r" % (rawdata[i:j],))
+        tag = match.group(1)
+
+        if not self.should_retain_case():           # Hacked
+            tag = tag.lower()                       # Hacked
+        self.handle_endtag(tag)                     # Hacked line
+        self.clear_cdata_mode()
+        return j
+
+
+def parse_html(html, is_fragment=False, retain_case=False):
     """ See docstring for OuterHTMLParser.
     Returns None if no HTML detected.
 
     :param is_fragment:     Unused, but may come into play later with fallback parsers.
     """
-    parser = OuterHTMLParser()
+    parser = OuterHTMLParser(retain_case=retain_case)
     try:
         parser.feed(html)
     except HTMLParseError, e:
-        logger.debug("Couldn't parse HTML: %s", html)
+        logger.debug("Couldn't parse HTML: %s", e)
         raise
     return parser.root
 

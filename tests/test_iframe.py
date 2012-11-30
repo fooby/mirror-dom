@@ -71,7 +71,7 @@ class TestFirefox(util.TestBrowserBase):
 
         print "Source: %s" % (source_iframe_html)
         print "Dest: %s" % (dest_iframe_html)
-        
+
         # Options here need to reflect the sanitising process. Maybe I could
         # just sanitise the source_iframe_html?
         compare_args.setdefault("ignore_tags", ["meta", "script"])
@@ -163,6 +163,7 @@ class TestFirefox(util.TestBrowserBase):
         Test 5: Check mirrordom messages contain initial html frame content.
         """
         self.init_webdriver()
+        #time.sleep(10.0)
 
         # Let's just throw in the dynamic iframe for good measure
         self.execute_script("""
@@ -215,6 +216,7 @@ class TestFirefox(util.TestBrowserBase):
         updates = mirrordom.server.handle_get_update(storage)
         print "Updates: %s" % (updates)
         self.apply_viewer_updates(updates)
+
         assert self.compare_inner_iframes('theiframe')
         assert self.compare_inner_iframes('thedynamiciframe')
 

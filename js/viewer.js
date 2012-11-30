@@ -4,9 +4,19 @@
 
 var MirrorDom = MirrorDom === undefined ? {} : MirrorDom;
 
-MirrorDom.RECEIVING_OK = 1;
-MirrorDom.RECEIVING_BAD = 2;
+MirrorDom.VIEWER_OK = 1;
+MirrorDom.VIEWER_LOCAL_HTML_ERROR = 2;
+MirrorDom.VIEWER_SERVER_ERROR = 3;
 
+MirrorDom.ERROR_INVALID_HTML = 'invalid_html';
+
+/**
+ *
+ */
+MirrorDom.ServerError = function(state, msg) {
+    this.state = state;
+    this.msg = msg;
+};
 
 /**
  * Constructor. See init_options for option processing
@@ -21,7 +31,7 @@ MirrorDom.Viewer = function(options) {
     // that don't exist), we go into a contingency mode where we don't apply
     // any further changes until the broadcaster visits a new page which gives
     // us a chance to start afresh.
-    this.error_status = MirrorDom.RECEIVING_OK;
+    this.error_status = MirrorDom.VIEWER_OK;
     this.iframe = null;
     this.event_listeners = {};
 
@@ -101,7 +111,7 @@ MirrorDom.Viewer.prototype.poll = function() {
     // Inform the server we only want an update if it contains a main frame
     // init_html (this basically means we wait until the broadcaster visits a
     // new page)
-    if (this.error_status == MirrorDom.RECEIVING_BAD) {
+    if (this.error_status == MirrorDom.VIEWER_LOCAL_HTML_ERROR) {
         // Note: this is extremely hacky, given that the "true" value gets run
         // through JSON on the other end.
         // TODO: Don't be hacky
@@ -158,8 +168,22 @@ function(changesets, resume_pos) {
                 this.log(e.message);
                 this.log('Path analysis: ' + e.describe_path());
             }
-            this.error_status = MirrorDom.RECEIVING_BAD;
+            this.error_status = MirrorDom.VIEWER_LOCAL_HTML_ERROR;
             this.fire_event('on_error_status', {'status': this.error_status});
+            return;
+        }
+        else if (e instanceof MirrorDom.ServerError) {
+            var new_error_status = MirrorDom.VIEWER_SERVER_ERROR;
+            if (this.debug) {
+                // Don't spam error messages
+                if (this.error_status != new_error_status) {
+                    this.log(e.msg);
+                }
+            }
+            if (this.error_status != new_error_status) {
+                this.fire_event('on_error_status', {'status': new_error_status});
+            }
+            this.error_status = new_error_status;
             return;
         }
         else {
@@ -208,7 +232,16 @@ function(changesets, resume_pos) {
     // fired.
     for (var i = resume_pos ? resume_pos : 0; i < changesets.length; i++) {
         var frame_path = changesets[i][0];
+        var frame_path_str = frame_path.join(',');
         var changes = changesets[i][1];
+
+
+        if ('error' in changes) {
+            throw new MirrorDom.ServerError(changes["error"],
+                   "Remote server error for frame " + frame_path_str + ": " +
+                   changes["error_msg"]);
+        }
+
         if (!('diffs' in changes || 'init_html' in changes)) {
             // Don't bother with this changeset, nothing worth doing
             continue;
@@ -218,11 +251,11 @@ function(changesets, resume_pos) {
         var iframe_doc = MirrorDom.get_iframe_document(iframe);
 
         // Commence iframe complexity
-        this.log('Changeset ' + i + ': Iframe ' + frame_path.join(',') +
+        this.log('Changeset ' + i + ': Iframe ' + frame_path_str +
                 ' ready state: ' + iframe_doc.readyState);
         if (iframe_doc.readyState == 'uninitialized') {
             this.log('Changeset ' + i + ': Initialising iframe: ' + i +
-                    ' on frame ' + frame_path.join(','));
+                    ' on frame ' + frame_path_str);
             // Unset and re-set it to force a reload
             iframe.src = '';
             // Hack: The "load" event doesn't trigger unless we force
@@ -233,9 +266,10 @@ function(changesets, resume_pos) {
             jQuery(iframe).load(callback);
             return;
         } else if (iframe_doc.readyState == 'loading') {
+            debugger;
             // Scenario 1: Newly created iframe
             this.log('Changeset ' + i + ': Waiting for iframe to finish ' +
-                    'loading: ' + i + ' on frame ' + frame_path.join(','));
+                    'loading: ' + i + ' on frame ' + frame_path_str);
             var callback = make_reentry_callback(i);
             jQuery(iframe).load(callback);
             return;
@@ -243,7 +277,7 @@ function(changesets, resume_pos) {
             // Scenario 2: IFrame exists, but we have init_html and want to
             // start fresh. Let's load a blank page first.
             this.log('Changeset ' + i + ': Init HTML found for changeset ' +
-                    i + ' on frame ' + frame_path.join(',') +
+                    i + ' on frame ' + frame_path_str +
                     ', resetting back to blank page');
             // Unset and re-set it to force a reload
             iframe.src = '';
@@ -281,8 +315,9 @@ MirrorDom.Viewer.prototype.apply_changeset = function(doc_elem, changelog) {
     if (changelog.init_html) {
         // init_html means a clean slate, so we're no longer concerned about
         // any previous diff errors encountered.
-        if (this.error_status == MirrorDom.RECEIVING_BAD) {
-            this.error_status = MirrorDom.RECEIVING_OK;
+        if (this.error_status == MirrorDom.VIEWER_LOCAL_HTML_ERROR ||
+                this.error_status == MirrorDom.VIEWER_SERVER_ERROR) {
+            this.error_status = MirrorDom.VIEWER_OK;
             this.fire_event('on_error_status', {'status': this.error_status});
         }
         this.log(changelog.last_change_id + ': Got new html!');
@@ -362,6 +397,9 @@ MirrorDom.Viewer.prototype.xml_to_string = function(xml_node) {
  */
 MirrorDom.Viewer.prototype.copy_to_node =
 function(xml_node, dest, use_innerhtml) {
+    if (xml_node[0] == undefined) {
+        debugger;
+    }
     var children = xml_node[0].childNodes;
     if (use_innerhtml) {
         var inner_html = [''];
@@ -412,12 +450,21 @@ MirrorDom.Viewer.prototype.apply_document = function(doc_elem, data) {
         throw new Error('Could not find <body> element in viewer document.');
     }
 
+    var find_new_doc_elem = function(tag) {
+        var result = new_doc.find(tag);
+        // Fallback: Try uppercase (innerHTML from IE will be uppercase)
+        if (result.length == 0) {
+            result = new_doc.find(tag.toUpperCase());
+        }
+        return result;
+    };
+
     current_body = jQuery(current_body).empty();
-    var new_body_node = new_doc.find('body');
+    var new_body_node = find_new_doc_elem('body');
     this.copy_to_node(new_body_node, current_body, true);
 
     // Set the head
-    var new_head_node = new_doc.find('head');
+    var new_head_node = find_new_doc_elem('head');
     if (new_head_node.length > 0) {
         var current_head = doc_elem.getElementsByTagName('head')[0];
         current_head = jQuery(current_head).empty();
